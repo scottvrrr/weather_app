@@ -1,6 +1,4 @@
-# app.py - Flask web server for Railway deployment
-# Requirements: flask, requests, python-dotenv, gunicorn (in requirements.txt)
-
+# app.py - Flask with zip code + browser geolocation
 import requests
 import os
 from flask import Flask, render_template_string, request, jsonify
@@ -14,7 +12,6 @@ if not API_KEY:
 
 app = Flask(__name__)
 
-# HTML template with embedded CSS (dark theme, responsive)
 HTML_TEMPLATE = """
 <!DOCTYPE html>
 <html>
@@ -34,42 +31,41 @@ HTML_TEMPLATE = """
         input, button { padding: 10px 16px; border: none; border-radius: 8px; background: #252c3b; color: #e0e4ec; }
         button { background: #3b4a5e; cursor: pointer; }
         button:hover { background: #4f617a; }
-        .search { display: flex; gap: 10px; margin-bottom: 20px; }
+        .search { display: flex; gap: 10px; margin-bottom: 20px; flex-wrap: wrap; }
+        .search input { flex: 1; min-width: 120px; }
+        .location-btn { background: #2a4a5e; }
+        .location-btn:hover { background: #3a6a7e; }
         .loading { opacity: 0.6; }
     </style>
 </head>
 <body>
     <h1>⛅ Hyperlocal Weather</h1>
     <div class="search">
-        <input id="lat" placeholder="Latitude" value="40.7128">
-        <input id="lon" placeholder="Longitude" value="-74.0060">
-        <button onclick="fetchWeather()">Update</button>
+        <input id="zipInput" placeholder="Enter ZIP code (e.g., 10001)" value="">
+        <button onclick="fetchByZip()">Get ZIP</button>
+        <button class="location-btn" onclick="fetchByLocation()">📍 My Location</button>
     </div>
     <div id="content">
-        <div class="card loading">Loading...</div>
+        <div class="card loading">Enter a ZIP or tap "My Location"</div>
     </div>
     <script>
-        function fetchWeather() {
-            const lat = document.getElementById('lat').value;
-            const lon = document.getElementById('lon').value;
+        function fetchWeather(lat, lon) {
             document.getElementById('content').innerHTML = '<div class="card loading">Updating...</div>';
             fetch(`/api/weather?lat=${lat}&lon=${lon}`)
                 .then(r => r.json())
                 .then(data => {
+                    if (data.error) { throw new Error(data.error); }
                     let html = '';
-                    // Current
                     const c = data.current;
                     html += `<div class="card"><div class="flex"><div><span class="temp-big">${c.temp}°C</span> <span class="metric">feels ${c.feels_like}°C</span><br>
                         ${c.description} · Humidity ${c.humidity}% · Pressure ${c.pressure} hPa</div>
                         <div>Wind ${c.wind_speed} m/s · Clouds ${c.clouds}% · Visibility ${c.visibility/1000} km</div></div>
                         <div>Sunrise ${c.sunrise.slice(11,16)} UTC · Sunset ${c.sunset.slice(11,16)} UTC</div></div>`;
-                    // Hourly (12)
                     html += `<div class="card"><h3>Next 12 hours</h3><div class="hourly-grid">`;
                     data.hourly.slice(0,12).forEach(h => {
                         html += `<div class="hour-item">${h.time.slice(11,16)}<br><strong>${h.temp}°</strong><br>${h.description}<br><span class="rain">☔ ${(h.pop*100).toFixed(0)}%</span> · <span class="wind">💨 ${h.wind_speed}</span></div>`;
                     });
                     html += `</div></div>`;
-                    // Daily (7)
                     html += `<div class="card"><h3>7-Day Forecast</h3><div class="daily-grid">`;
                     data.daily.forEach(d => {
                         html += `<div class="day-item">${d.date.slice(5)}<br><strong>${d.temp_day}°</strong> / ${d.temp_night}°<br>${d.description}<br><span class="rain">☔ ${(d.pop*100).toFixed(0)}%</span></div>`;
@@ -79,17 +75,50 @@ HTML_TEMPLATE = """
                 })
                 .catch(err => document.getElementById('content').innerHTML = `<div class="card">Error: ${err.message}</div>`);
         }
-        fetchWeather();
+
+        function fetchByZip() {
+            const zip = document.getElementById('zipInput').value.trim();
+            if (!zip) { alert('Enter a ZIP code'); return; }
+            fetch(`/api/zip?zip=${zip}`)
+                .then(r => r.json())
+                .then(data => {
+                    if (data.error) { throw new Error(data.error); }
+                    fetchWeather(data.lat, data.lon);
+                })
+                .catch(err => document.getElementById('content').innerHTML = `<div class="card">ZIP error: ${err.message}</div>`);
+        }
+
+        function fetchByLocation() {
+            if (!navigator.geolocation) {
+                alert('Geolocation not supported by your browser');
+                return;
+            }
+            navigator.geolocation.getCurrentPosition(
+                pos => fetchWeather(pos.coords.latitude, pos.coords.longitude),
+                err => document.getElementById('content').innerHTML = `<div class="card">Location denied or error: ${err.message}</div>`
+            );
+        }
+
+        // Auto-load with default NYC if no action
+        window.onload = function() {
+            // Optionally try location on load, but we leave it manual.
+        };
     </script>
 </body>
 </html>
 """
 
+def geocode_zip(zip_code):
+    # OpenWeather geocoding API – zip to lat/lon
+    url = f"http://api.openweathermap.org/geo/1.0/zip?zip={zip_code}&appid={API_KEY}"
+    resp = requests.get(url, timeout=10).json()
+    if "lat" not in resp:
+        raise ValueError(f"ZIP not found: {zip_code}")
+    return resp["lat"], resp["lon"]
+
 def get_weather_data(lat, lon):
-    # Current
     url_curr = f"https://api.openweathermap.org/data/2.5/weather?lat={lat}&lon={lon}&appid={API_KEY}&units=metric"
     curr = requests.get(url_curr, timeout=10).json()
-    # OneCall for hourly/daily
     url_one = f"https://api.openweathermap.org/data/3.0/onecall?lat={lat}&lon={lon}&exclude=minutely,alerts&appid={API_KEY}&units=metric"
     one = requests.get(url_one, timeout=10).json()
     
@@ -131,13 +160,26 @@ def index():
 
 @app.route('/api/weather')
 def api_weather():
-    lat = request.args.get('lat', '40.7128')
-    lon = request.args.get('lon', '-74.0060')
+    lat = request.args.get('lat')
+    lon = request.args.get('lon')
+    if not lat or not lon:
+        return jsonify({"error": "Missing lat/lon"}), 400
     try:
-        data = get_weather_data(lat, lon)
+        data = get_weather_data(float(lat), float(lon))
         return jsonify(data)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+@app.route('/api/zip')
+def api_zip():
+    zip_code = request.args.get('zip')
+    if not zip_code:
+        return jsonify({"error": "Missing zip"}), 400
+    try:
+        lat, lon = geocode_zip(zip_code)
+        return jsonify({"lat": lat, "lon": lon})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 404
 
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 5000))
