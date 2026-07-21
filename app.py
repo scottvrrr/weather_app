@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# app.py - Interactive Weather Hub with NWS alerts, themes, clickable hourly, Imperial units
+# app.py - Interactive Weather Hub with Admin Panel, NWS Alerts, Themes
 import requests
 import os
 import logging
@@ -15,7 +15,6 @@ if not API_KEY:
 app = Flask(__name__)
 logging.basicConfig(level=logging.INFO)
 
-# In-memory subscription store (for demo)
 subscriptions = []
 
 HTML_TEMPLATE = """
@@ -54,6 +53,7 @@ HTML_TEMPLATE = """
             transition: background var(--transition), color var(--transition);
         }
         .app { max-width: 500px; width: 100%; margin: 0 auto; }
+        /* Theme bar */
         .theme-bar {
             display: flex;
             gap: 6px;
@@ -74,6 +74,7 @@ HTML_TEMPLATE = """
         }
         .theme-btn:hover { background: var(--accent); color: white; border-color: var(--accent); }
         .theme-btn.active { background: var(--accent); color: white; border-color: var(--accent); }
+        /* Header (triple-click for admin) */
         .header {
             display: flex;
             justify-content: space-between;
@@ -81,6 +82,8 @@ HTML_TEMPLATE = """
             padding: 8px 0;
             border-bottom: 1px solid var(--border);
             margin-bottom: 14px;
+            cursor: default;
+            user-select: none;
         }
         .header h1 { font-size: 1.4rem; font-weight: 600; letter-spacing: -0.5px; }
         .header-actions button {
@@ -95,6 +98,7 @@ HTML_TEMPLATE = """
             margin-left: 4px;
         }
         .header-actions button:hover { background: var(--accent); color: white; }
+        /* Search */
         .search-row {
             display: flex;
             gap: 6px;
@@ -127,6 +131,7 @@ HTML_TEMPLATE = """
         .search-row button:hover { filter: brightness(1.1); }
         .search-row .loc-btn { background: var(--card-bg); color: var(--text); border: 1px solid var(--border); }
         .search-row .loc-btn:hover { background: var(--accent); color: white; }
+        /* Notify */
         .notify-btn {
             background: var(--card-bg);
             border: 1px solid var(--border);
@@ -141,6 +146,7 @@ HTML_TEMPLATE = """
             text-align: center;
         }
         .notify-btn:hover { background: var(--accent); color: white; }
+        /* Alert banner */
         .alert-banner {
             background: rgba(255,200,50,0.12);
             border: 1px solid #ffcc44;
@@ -154,6 +160,7 @@ HTML_TEMPLATE = """
         .alert-banner:hover { background: rgba(255,200,50,0.2); }
         .alert-banner .alert-title { font-weight: 600; color: #ffcc44; }
         .alert-banner .alert-desc { font-size: 0.8rem; color: var(--secondary); }
+        /* Current card */
         .current-card {
             background: var(--card-bg);
             backdrop-filter: blur(20px);
@@ -162,8 +169,9 @@ HTML_TEMPLATE = """
             margin-bottom: 16px;
             border: 1px solid var(--border);
             box-shadow: 0 8px 32px var(--shadow);
-            transition: background var(--transition);
+            transition: background var(--transition), transform 0.2s;
         }
+        .current-card:hover { transform: scale(1.01); }
         .temp-row { display: flex; justify-content: space-between; align-items: center; }
         .temp-main { font-size: 3.8rem; font-weight: 300; letter-spacing: -2px; line-height: 1; }
         .temp-main small { font-size: 1.6rem; font-weight: 300; color: var(--secondary); }
@@ -236,6 +244,7 @@ HTML_TEMPLATE = """
         .day-item .day-temps .high { color: var(--text); }
         .day-item .day-temps .low { color: var(--secondary); margin-left: 6px; }
         .day-item .day-pop { font-size: 0.75rem; color: var(--accent); width: 45px; text-align: right; }
+        /* Modal */
         .modal {
             display: none;
             position: fixed;
@@ -271,6 +280,7 @@ HTML_TEMPLATE = """
             width: 100%;
         }
         .modal-content .close-btn:hover { filter: brightness(1.1); }
+        /* Loading / Error */
         .loading-state { text-align: center; padding: 30px 0; color: var(--secondary); }
         .error-state { background: rgba(255,70,70,0.08); border: 1px solid rgba(255,70,70,0.2); border-radius: 16px; padding: 16px; color: #ff7a7a; text-align: center; }
         .debug-box {
@@ -287,6 +297,40 @@ HTML_TEMPLATE = """
             border: 1px solid var(--border);
         }
         .notify-status { font-size: 0.7rem; color: var(--secondary); text-align: center; margin-top: 4px; }
+        /* Admin panel – hidden by default */
+        .admin-panel {
+            background: var(--card-bg);
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            padding: 16px;
+            margin-top: 16px;
+            display: none;
+        }
+        .admin-panel h4 { font-size: 0.9rem; margin-bottom: 8px; color: var(--accent); }
+        .admin-panel button {
+            background: var(--card-bg);
+            border: 1px solid var(--border);
+            color: var(--text);
+            padding: 6px 14px;
+            border-radius: 20px;
+            cursor: pointer;
+            margin: 4px 4px 0 0;
+            font-size: 0.75rem;
+        }
+        .admin-panel button:hover { background: var(--accent); color: white; }
+        .admin-panel .log-area {
+            background: rgba(0,0,0,0.2);
+            border-radius: 8px;
+            padding: 8px;
+            font-size: 0.65rem;
+            max-height: 100px;
+            overflow-y: auto;
+            margin-top: 8px;
+            font-family: monospace;
+            color: var(--secondary);
+            white-space: pre-wrap;
+            word-break: break-all;
+        }
         @media (max-width: 480px) {
             .temp-main { font-size: 3rem; }
             .extra-details { grid-template-columns: 1fr 1fr; }
@@ -295,6 +339,7 @@ HTML_TEMPLATE = """
 </head>
 <body>
 <div class="app">
+    <!-- Theme Bar -->
     <div class="theme-bar">
         <button class="theme-btn active" data-theme="apple-dark">🍎 Dark</button>
         <button class="theme-btn" data-theme="apple-light">🍎 Light</button>
@@ -302,7 +347,8 @@ HTML_TEMPLATE = """
         <button class="theme-btn" data-theme="lightning">⚡ Lightning</button>
     </div>
 
-    <div class="header">
+    <!-- Header (triple-click for admin) -->
+    <div class="header" id="headerTitle">
         <h1>⛅ Weather Hub</h1>
         <div class="header-actions">
             <button onclick="fetchByLocation()" title="My Location">📍</button>
@@ -310,25 +356,29 @@ HTML_TEMPLATE = """
         </div>
     </div>
 
+    <!-- Search -->
     <div class="search-row">
         <input id="zipInput" placeholder="ZIP code (e.g., 43065)" value="">
         <button onclick="fetchByZip()">Search</button>
         <button class="loc-btn" onclick="fetchByLocation()">📍</button>
     </div>
 
+    <!-- Notifications -->
     <button class="notify-btn" id="notifyBtn" onclick="subscribePush()">🔔 Enable Notifications</button>
     <div class="notify-status" id="notifyStatus">Get severe weather alerts via push</div>
 
+    <!-- Alert Banner -->
     <div class="alert-banner" id="alertBanner" onclick="showAlertModal()">
         <div class="alert-title" id="alertTitle">⚠️ Weather Alert</div>
         <div class="alert-desc" id="alertDesc">Click for details</div>
     </div>
 
+    <!-- Main content -->
     <div id="content">
         <div class="loading-state">Enter a ZIP or tap location</div>
     </div>
 
-    <!-- Hourly detail modal -->
+    <!-- Modals -->
     <div class="modal" id="hourModal">
         <div class="modal-content">
             <h2 id="modalTitle">Hour Detail</h2>
@@ -336,14 +386,22 @@ HTML_TEMPLATE = """
             <button class="close-btn" onclick="closeModal()">Close</button>
         </div>
     </div>
-
-    <!-- NWS alert modal -->
     <div class="modal" id="alertModal">
         <div class="modal-content">
             <h2>⚠️ NWS Alert</h2>
             <div id="alertBody"></div>
             <button class="close-btn" onclick="closeAlertModal()">Close</button>
         </div>
+    </div>
+
+    <!-- Admin Panel (hidden) -->
+    <div class="admin-panel" id="adminPanel">
+        <h4>🛠️ Admin Panel</h4>
+        <button onclick="testAlert()">🔔 Test Alert</button>
+        <button onclick="refreshWeather()">🔄 Force Refresh</button>
+        <button onclick="triggerPush()">📲 Send Test Push</button>
+        <button onclick="clearLogs()">🗑️ Clear Log</button>
+        <div class="log-area" id="adminLog">Ready.</div>
     </div>
 
     <div class="debug-box" id="debug"></div>
@@ -422,14 +480,38 @@ applyTheme(saved);
 let currentLat = null, currentLon = null;
 let hourlyData = [];
 let currentAlerts = [];
+let clickCount = 0;
+let clickTimer = null;
 
+// ===== ADMIN PANEL TOGGLE (triple-click header) =====
+document.getElementById('headerTitle').addEventListener('click', function(e) {
+    clickCount++;
+    clearTimeout(clickTimer);
+    clickTimer = setTimeout(() => { clickCount = 0; }, 500);
+    if (clickCount === 3) {
+        const panel = document.getElementById('adminPanel');
+        panel.style.display = panel.style.display === 'block' ? 'none' : 'block';
+        adminLog('Admin panel toggled');
+        clickCount = 0;
+    }
+});
+
+function adminLog(msg) {
+    const log = document.getElementById('adminLog');
+    log.innerHTML += new Date().toLocaleTimeString() + ' :: ' + msg + '\\n';
+    log.scrollTop = log.scrollHeight;
+}
+
+// ===== LOGGING =====
 function logDebug(msg) {
     const el = document.getElementById('debug');
     el.style.display = 'block';
     el.innerHTML += new Date().toLocaleTimeString() + ' :: ' + msg + '<br>';
     el.scrollTop = el.scrollHeight;
+    adminLog('DEBUG: ' + msg);
 }
 
+// ===== UI HELPERS =====
 function showLoading(text) {
     document.getElementById('content').innerHTML = '<div class="loading-state">⏳ ' + text + '</div>';
 }
@@ -453,6 +535,7 @@ function formatDay(isoDate) {
     return days[d.getUTCDay()];
 }
 
+// ===== RENDER WEATHER =====
 function renderWeather(data) {
     const c = data.current;
     const hourly = data.hourly;
@@ -511,7 +594,7 @@ function renderWeather(data) {
     logDebug('Display updated');
 }
 
-// ===== MODAL: HOURLY DETAIL =====
+// ===== MODAL: HOURLY =====
 function showHourDetail(idx) {
     const h = hourlyData[idx];
     if (!h) return;
@@ -538,16 +621,22 @@ function closeModal() {
 
 // ===== NWS ALERTS =====
 function fetchAlerts(lat, lon) {
+    logDebug('Fetching NWS alerts...');
     fetch('/api/nws?lat=' + lat + '&lon=' + lon)
         .then(r => r.json())
         .then(data => {
+            if (data.error) {
+                logDebug('NWS error: ' + data.error);
+                // If NWS fails, we can optionally show a test alert via admin
+                return;
+            }
             if (data.alerts && data.alerts.length > 0) {
                 currentAlerts = data.alerts;
                 const banner = document.getElementById('alertBanner');
                 banner.style.display = 'block';
                 document.getElementById('alertTitle').textContent = '⚠️ ' + data.alerts.length + ' Alert(s)';
                 document.getElementById('alertDesc').textContent = data.alerts[0].headline || data.alerts[0].event;
-                // Push notification if subscribed
+                // Push notification
                 if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
                     navigator.serviceWorker.ready.then(reg => {
                         reg.showNotification('⚠️ Weather Alert', {
@@ -557,15 +646,24 @@ function fetchAlerts(lat, lon) {
                         });
                     });
                 }
+                logDebug('Displayed ' + data.alerts.length + ' alerts');
             } else {
                 document.getElementById('alertBanner').style.display = 'none';
+                logDebug('No alerts for this location');
             }
         })
-        .catch(err => logDebug('NWS error: ' + err.message));
+        .catch(err => {
+            logDebug('NWS fetch error: ' + err.message);
+            // Fallback: show a demo alert if we want to test UI
+        });
 }
 
 function showAlertModal() {
-    if (currentAlerts.length === 0) return;
+    if (currentAlerts.length === 0) {
+        // If no real alerts, offer to show a test alert from admin
+        alert('No active alerts. Use Admin Panel to test.');
+        return;
+    }
     const modal = document.getElementById('alertModal');
     let html = '';
     currentAlerts.forEach(a => {
@@ -585,13 +683,14 @@ function closeAlertModal() {
 // ===== WEATHER FETCH =====
 function fetchWeather(lat, lon) {
     currentLat = lat; currentLon = lon;
-    logDebug('Fetching lat=' + lat.toFixed(4) + ' lon=' + lon.toFixed(4));
+    logDebug('Fetching weather...');
     showLoading('Fetching weather...');
     fetch('/api/weather?lat=' + lat + '&lon=' + lon)
         .then(r => r.json())
         .then(data => {
             if (data.error) throw new Error(data.error);
             renderWeather(data);
+            // Now fetch alerts
             fetchAlerts(lat, lon);
         })
         .catch(err => {
@@ -640,9 +739,56 @@ window.refreshWeather = function() {
     }
 };
 
+// ===== TEST ALERT (Admin) =====
+window.testAlert = function() {
+    const testData = [{
+        event: 'Test Alert',
+        headline: 'This is a simulated NWS alert for testing',
+        description: 'This alert is generated by the admin panel to demonstrate the UI. No actual weather warning exists.',
+        severity: 'Test',
+        effective: new Date().toISOString()
+    }];
+    currentAlerts = testData;
+    const banner = document.getElementById('alertBanner');
+    banner.style.display = 'block';
+    document.getElementById('alertTitle').textContent = '⚠️ TEST Alert';
+    document.getElementById('alertDesc').textContent = 'Simulated NWS alert – click for details';
+    adminLog('Test alert displayed');
+    // Also trigger push if subscribed
+    if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
+        navigator.serviceWorker.ready.then(reg => {
+            reg.showNotification('⚠️ TEST Alert', {
+                body: 'This is a test push notification from admin panel.',
+                icon: '/icon.png',
+                tag: 'test-alert'
+            });
+        });
+    }
+};
+
+window.triggerPush = function() {
+    if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
+        navigator.serviceWorker.ready.then(reg => {
+            reg.showNotification('📢 Admin Test', {
+                body: 'This push was triggered from the admin panel.',
+                icon: '/icon.png',
+                tag: 'admin-test'
+            });
+            adminLog('Test push sent');
+        });
+    } else {
+        alert('Service worker not active. Enable notifications first.');
+    }
+};
+
+window.clearLogs = function() {
+    document.getElementById('adminLog').innerHTML = 'Cleared.';
+    document.getElementById('debug').innerHTML = '';
+    document.getElementById('debug').style.display = 'none';
+};
+
 // ===== PUSH NOTIFICATIONS =====
-// Valid dummy VAPID public key (base64 encoded 65 bytes) – replace with your own for production
-const VAPID_PUBLIC_KEY = 'BEl62jU0dk1oYzNQeV9pZ2p5bXZQdW5yTlZvY3ZvLmNvbS9zdWJzY3JpYmUtaWQ6OTk5';
+const VAPID_PUBLIC_KEY = 'BPtmgQv8hflZW4VYcjZV7QgVry8NSMddcBuoB53mzLZdrhYO81oKlpS1XW0I9zwxxj63qSJD_6DvMkekYqqf7XY';
 
 function subscribePush() {
     if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
@@ -650,10 +796,12 @@ function subscribePush() {
         return;
     }
     navigator.serviceWorker.register('/sw.js')
-        .then(reg => reg.pushManager.subscribe({
-            userVisibleOnly: true,
-            applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY)
-        }))
+        .then(reg => {
+            return reg.pushManager.subscribe({
+                userVisibleOnly: true,
+                applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY)
+            });
+        })
         .then(sub => {
             fetch('/api/subscribe', {
                 method: 'POST',
@@ -661,12 +809,14 @@ function subscribePush() {
                 body: JSON.stringify(sub)
             }).then(res => res.json()).then(data => {
                 document.getElementById('notifyStatus').textContent = '✅ Notifications enabled';
-                logDebug('Subscribed');
+                logDebug('Subscribed to push');
+                adminLog('Push subscription successful');
             });
         })
         .catch(err => {
             document.getElementById('notifyStatus').textContent = '❌ ' + err.message;
             logDebug('Push error: ' + err.message);
+            adminLog('Push error: ' + err.message);
         });
 }
 
@@ -681,7 +831,7 @@ function urlBase64ToUint8Array(base64String) {
     return outputArray;
 }
 
-// Register service worker
+// Service worker registration
 if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('/sw.js')
         .then(() => logDebug('SW registered'))
@@ -691,6 +841,7 @@ if ('serviceWorker' in navigator) {
 // Auto-load on start
 window.onload = function() {
     fetchByLocation();
+    adminLog('App loaded');
 };
 </script>
 </body>
@@ -856,30 +1007,41 @@ def get_weather_data(lat, lon):
     return {"current": current, "hourly": hourly, "daily": daily}
 
 def get_nws_alerts(lat, lon):
+    # Proper User-Agent required by NWS API
+    headers = {
+        "User-Agent": "WeatherHub/1.0 (https://your-app.railway.app; scottvrrr@gmail.com)",
+        "Accept": "application/json"
+    }
     point_url = f"https://api.weather.gov/points/{lat},{lon}"
-    point_resp = requests.get(point_url, headers={"User-Agent": "WeatherApp/1.0"})
-    if point_resp.status_code != 200:
+    try:
+        point_resp = requests.get(point_url, headers=headers, timeout=10)
+        if point_resp.status_code != 200:
+            app.logger.warning(f"NWS point API returned {point_resp.status_code}")
+            return []
+        point_data = point_resp.json()
+        alerts_url = point_data.get("properties", {}).get("alerts")
+        if not alerts_url:
+            return []
+        alerts_resp = requests.get(alerts_url, headers=headers, timeout=10)
+        if alerts_resp.status_code != 200:
+            app.logger.warning(f"NWS alerts API returned {alerts_resp.status_code}")
+            return []
+        alerts_data = alerts_resp.json()
+        features = alerts_data.get("features", [])
+        result = []
+        for f in features:
+            props = f.get("properties", {})
+            result.append({
+                "event": props.get("event", "Unknown"),
+                "headline": props.get("headline", ""),
+                "description": props.get("description", ""),
+                "severity": props.get("severity", ""),
+                "effective": props.get("effective", "")
+            })
+        return result
+    except Exception as e:
+        app.logger.error(f"NWS exception: {str(e)}")
         return []
-    point_data = point_resp.json()
-    alerts_url = point_data.get("properties", {}).get("alerts")
-    if not alerts_url:
-        return []
-    alerts_resp = requests.get(alerts_url, headers={"User-Agent": "WeatherApp/1.0"})
-    if alerts_resp.status_code != 200:
-        return []
-    alerts_data = alerts_resp.json()
-    features = alerts_data.get("features", [])
-    result = []
-    for f in features:
-        props = f.get("properties", {})
-        result.append({
-            "event": props.get("event", "Unknown"),
-            "headline": props.get("headline", ""),
-            "description": props.get("description", ""),
-            "severity": props.get("severity", ""),
-            "effective": props.get("effective", "")
-        })
-    return result
 
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 5000))
