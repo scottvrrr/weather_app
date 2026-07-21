@@ -1,8 +1,7 @@
 # -*- coding: utf-8 -*-
-# app.py - Interactive Weather Hub (ASCII safe, all features)
+# app.py - Interactive Weather Hub with NWS alerts, themes, clickable hourly, Imperial units
 import requests
 import os
-import json
 import logging
 from flask import Flask, render_template_string, request, jsonify
 from datetime import datetime, timezone
@@ -16,6 +15,7 @@ if not API_KEY:
 app = Flask(__name__)
 logging.basicConfig(level=logging.INFO)
 
+# In-memory subscription store (for demo)
 subscriptions = []
 
 HTML_TEMPLATE = """
@@ -296,31 +296,31 @@ HTML_TEMPLATE = """
 <body>
 <div class="app">
     <div class="theme-bar">
-        <button class="theme-btn active" data-theme="apple-dark">Apple Dark</button>
-        <button class="theme-btn" data-theme="apple-light">Apple Light</button>
-        <button class="theme-btn" data-theme="retro">Retro</button>
-        <button class="theme-btn" data-theme="lightning">Lightning</button>
+        <button class="theme-btn active" data-theme="apple-dark">🍎 Dark</button>
+        <button class="theme-btn" data-theme="apple-light">🍎 Light</button>
+        <button class="theme-btn" data-theme="retro">🖥 Retro</button>
+        <button class="theme-btn" data-theme="lightning">⚡ Lightning</button>
     </div>
 
     <div class="header">
-        <h1>Weather Hub</h1>
+        <h1>⛅ Weather Hub</h1>
         <div class="header-actions">
-            <button onclick="fetchByLocation()" title="My Location">Loc</button>
-            <button onclick="refreshWeather()" title="Refresh">Ref</button>
+            <button onclick="fetchByLocation()" title="My Location">📍</button>
+            <button onclick="refreshWeather()" title="Refresh">⟳</button>
         </div>
     </div>
 
     <div class="search-row">
         <input id="zipInput" placeholder="ZIP code (e.g., 43065)" value="">
         <button onclick="fetchByZip()">Search</button>
-        <button class="loc-btn" onclick="fetchByLocation()">Loc</button>
+        <button class="loc-btn" onclick="fetchByLocation()">📍</button>
     </div>
 
-    <button class="notify-btn" id="notifyBtn" onclick="subscribePush()">Enable Notifications</button>
-    <div class="notify-status" id="notifyStatus">Tap to get alerts for severe weather</div>
+    <button class="notify-btn" id="notifyBtn" onclick="subscribePush()">🔔 Enable Notifications</button>
+    <div class="notify-status" id="notifyStatus">Get severe weather alerts via push</div>
 
     <div class="alert-banner" id="alertBanner" onclick="showAlertModal()">
-        <div class="alert-title" id="alertTitle">Weather Alert</div>
+        <div class="alert-title" id="alertTitle">⚠️ Weather Alert</div>
         <div class="alert-desc" id="alertDesc">Click for details</div>
     </div>
 
@@ -328,6 +328,7 @@ HTML_TEMPLATE = """
         <div class="loading-state">Enter a ZIP or tap location</div>
     </div>
 
+    <!-- Hourly detail modal -->
     <div class="modal" id="hourModal">
         <div class="modal-content">
             <h2 id="modalTitle">Hour Detail</h2>
@@ -336,9 +337,10 @@ HTML_TEMPLATE = """
         </div>
     </div>
 
+    <!-- NWS alert modal -->
     <div class="modal" id="alertModal">
         <div class="modal-content">
-            <h2>NWS Alert</h2>
+            <h2>⚠️ NWS Alert</h2>
             <div id="alertBody"></div>
             <button class="close-btn" onclick="closeAlertModal()">Close</button>
         </div>
@@ -348,7 +350,7 @@ HTML_TEMPLATE = """
 </div>
 
 <script>
-// ===== Themes =====
+// ===== THEMES =====
 const themes = {
     'apple-dark': {
         '--bg': '#0a0e14',
@@ -416,9 +418,8 @@ document.querySelectorAll('.theme-btn').forEach(btn => {
 const saved = localStorage.getItem('weatherTheme') || 'apple-dark';
 applyTheme(saved);
 
-// ===== State =====
-let currentLat = null;
-let currentLon = null;
+// ===== STATE =====
+let currentLat = null, currentLon = null;
 let hourlyData = [];
 let currentAlerts = [];
 
@@ -430,21 +431,21 @@ function logDebug(msg) {
 }
 
 function showLoading(text) {
-    document.getElementById('content').innerHTML = '<div class="loading-state">' + text + '</div>';
+    document.getElementById('content').innerHTML = '<div class="loading-state">⏳ ' + text + '</div>';
 }
 function showError(msg) {
-    document.getElementById('content').innerHTML = '<div class="error-state">' + msg + '</div>';
+    document.getElementById('content').innerHTML = '<div class="error-state">⚠️ ' + msg + '</div>';
     logDebug('ERROR: ' + msg);
 }
 function getIcon(desc) {
     const d = desc.toLowerCase();
-    if (d.includes('clear')) return 'SUN';
-    if (d.includes('cloud')) return 'CLD';
-    if (d.includes('rain')) return 'RAIN';
-    if (d.includes('thunder')) return 'TSTRM';
-    if (d.includes('snow')) return 'SNOW';
-    if (d.includes('mist') || d.includes('fog')) return 'FOG';
-    return '---';
+    if (d.includes('clear')) return '☀️';
+    if (d.includes('cloud')) return '☁️';
+    if (d.includes('rain')) return '🌧️';
+    if (d.includes('thunder')) return '⛈️';
+    if (d.includes('snow')) return '❄️';
+    if (d.includes('mist') || d.includes('fog')) return '🌫️';
+    return '🌤️';
 }
 function formatDay(isoDate) {
     const days = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
@@ -463,7 +464,7 @@ function renderWeather(data) {
     html += '<div class="temp-row"><div>';
     html += '<div class="temp-main">' + Math.round(c.temp) + '°<small>F</small></div>';
     html += '<div class="condition-text">' + c.description + '</div>';
-    html += '<div class="high-low">H: ' + Math.round(c.temp_max) + '° L: ' + Math.round(c.temp_min) + '°</div>';
+    html += '<div class="high-low">H: ' + Math.round(c.temp_max) + '° · L: ' + Math.round(c.temp_min) + '°</div>';
     html += '</div><div style="font-size:3.8rem;">' + getIcon(c.description) + '</div></div>';
 
     html += '<div class="extra-details">';
@@ -471,15 +472,16 @@ function renderWeather(data) {
     html += '<div class="extra-detail"><div class="label">Humidity</div><div class="value">' + c.humidity + '%</div></div>';
     html += '<div class="extra-detail"><div class="label">Wind</div><div class="value">' + Math.round(c.wind_speed) + ' mph</div></div>';
     html += '<div class="extra-detail"><div class="label">Pressure</div><div class="value">' + c.pressure + ' hPa</div></div>';
-    html += '<div class="extra-detail"><div class="label">UV Index</div><div class="value">' + (c.uvi || '--') + '</div></div>';
+    html += '<div class="extra-detail"><div class="label">UV Index</div><div class="value">' + (c.uvi || '—') + '</div></div>';
     html += '<div class="extra-detail"><div class="label">Visibility</div><div class="value">' + (c.visibility/1609).toFixed(1) + ' mi</div></div>';
     html += '</div>';
 
     html += '<div style="margin-top:10px; font-size:0.75rem; color:var(--secondary); display:flex; justify-content:space-between;">';
-    html += '<span>Sunrise ' + c.sunrise.slice(11,16) + '</span>';
-    html += '<span>Sunset ' + c.sunset.slice(11,16) + '</span>';
+    html += '<span>☀️ Rise ' + c.sunrise.slice(11,16) + '</span>';
+    html += '<span>🌇 Set ' + c.sunset.slice(11,16) + '</span>';
     html += '</div></div>';
 
+    // Hourly
     html += '<div class="section-title"><h3>Hourly</h3><span>click for details</span></div>';
     html += '<div class="hourly-scroll">';
     hourly.slice(0,8).forEach((h, idx) => {
@@ -487,11 +489,12 @@ function renderWeather(data) {
         html += '<div class="time">' + h.time.slice(11,16) + '</div>';
         html += '<div class="icon">' + getIcon(h.description) + '</div>';
         html += '<div class="temp">' + Math.round(h.temp) + '°</div>';
-        html += '<div class="pop">' + (h.pop > 0 ? Math.round(h.pop*100)+'%' : '') + '</div>';
+        html += '<div class="pop">' + (h.pop > 0 ? Math.round(h.pop*100) + '%' : '') + '</div>';
         html += '</div>';
     });
     html += '</div>';
 
+    // Daily
     html += '<div class="section-title"><h3>5-Day Forecast</h3></div><div class="daily-list">';
     daily.forEach(d => {
         const dayName = (d.date === new Date().toISOString().slice(0,10)) ? 'Today' : formatDay(d.date);
@@ -499,7 +502,7 @@ function renderWeather(data) {
         html += '<span class="day-name">' + dayName + '</span>';
         html += '<span class="day-icon">' + getIcon(d.description) + '</span>';
         html += '<span class="day-temps"><span class="high">' + Math.round(d.temp_max) + '°</span><span class="low">' + Math.round(d.temp_min) + '°</span></span>';
-        html += '<span class="day-pop">' + (d.pop > 0 ? Math.round(d.pop*100)+'%' : '') + '</span>';
+        html += '<span class="day-pop">' + (d.pop > 0 ? Math.round(d.pop*100) + '%' : '') + '</span>';
         html += '</div>';
     });
     html += '</div>';
@@ -508,22 +511,23 @@ function renderWeather(data) {
     logDebug('Display updated');
 }
 
+// ===== MODAL: HOURLY DETAIL =====
 function showHourDetail(idx) {
     const h = hourlyData[idx];
     if (!h) return;
     const modal = document.getElementById('hourModal');
-    document.getElementById('modalTitle').textContent = 'Hour: ' + h.time.slice(11,16);
+    document.getElementById('modalTitle').textContent = '🕒 ' + h.time.slice(11,16);
     let body = '';
     body += '<p><strong>Temp:</strong> ' + Math.round(h.temp) + '°F</p>';
     body += '<p><strong>Condition:</strong> ' + h.description + '</p>';
     body += '<p><strong>Rain chance:</strong> ' + Math.round(h.pop*100) + '%</p>';
     body += '<p><strong>Wind:</strong> ' + Math.round(h.wind_speed) + ' mph</p>';
-    body += '<p><strong>Humidity:</strong> ' + (h.humidity || '--') + '%</p>';
+    body += '<p><strong>Humidity:</strong> ' + (h.humidity || '—') + '%</p>';
     if (h.pop > 0.5) {
         const est = Math.round((h.pop * 2) * 10) / 10;
-        body += '<p><strong>Rain expected to last:</strong> ~' + est + ' hours</p>';
+        body += '<p><strong>🌧 Rain expected to last:</strong> ~' + est + ' hours</p>';
     } else {
-        body += '<p><strong>No significant rain expected</strong></p>';
+        body += '<p><strong>☀️ No significant rain expected</strong></p>';
     }
     document.getElementById('modalBody').innerHTML = body;
     modal.classList.add('active');
@@ -532,6 +536,7 @@ function closeModal() {
     document.getElementById('hourModal').classList.remove('active');
 }
 
+// ===== NWS ALERTS =====
 function fetchAlerts(lat, lon) {
     fetch('/api/nws?lat=' + lat + '&lon=' + lon)
         .then(r => r.json())
@@ -540,11 +545,12 @@ function fetchAlerts(lat, lon) {
                 currentAlerts = data.alerts;
                 const banner = document.getElementById('alertBanner');
                 banner.style.display = 'block';
-                document.getElementById('alertTitle').textContent = 'Alert: ' + data.alerts.length;
+                document.getElementById('alertTitle').textContent = '⚠️ ' + data.alerts.length + ' Alert(s)';
                 document.getElementById('alertDesc').textContent = data.alerts[0].headline || data.alerts[0].event;
+                // Push notification if subscribed
                 if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
                     navigator.serviceWorker.ready.then(reg => {
-                        reg.showNotification('Weather Alert', {
+                        reg.showNotification('⚠️ Weather Alert', {
                             body: data.alerts[0].headline || data.alerts[0].event,
                             icon: '/icon.png',
                             tag: 'nws-alert'
@@ -576,6 +582,7 @@ function closeAlertModal() {
     document.getElementById('alertModal').classList.remove('active');
 }
 
+// ===== WEATHER FETCH =====
 function fetchWeather(lat, lon) {
     currentLat = lat; currentLon = lon;
     logDebug('Fetching lat=' + lat.toFixed(4) + ' lon=' + lon.toFixed(4));
@@ -633,15 +640,19 @@ window.refreshWeather = function() {
     }
 };
 
+// ===== PUSH NOTIFICATIONS =====
+// Valid dummy VAPID public key (base64 encoded 65 bytes) – replace with your own for production
+const VAPID_PUBLIC_KEY = 'BEl62jU0dk1oYzNQeV9pZ2p5bXZQdW5yTlZvY3ZvLmNvbS9zdWJzY3JpYmUtaWQ6OTk5';
+
 function subscribePush() {
     if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
-        document.getElementById('notifyStatus').textContent = 'Push not supported';
+        document.getElementById('notifyStatus').textContent = '❌ Push not supported';
         return;
     }
     navigator.serviceWorker.register('/sw.js')
         .then(reg => reg.pushManager.subscribe({
             userVisibleOnly: true,
-            applicationServerKey: urlBase64ToUint8Array('YOUR_VAPID_PUBLIC_KEY')
+            applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY)
         }))
         .then(sub => {
             fetch('/api/subscribe', {
@@ -649,12 +660,12 @@ function subscribePush() {
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify(sub)
             }).then(res => res.json()).then(data => {
-                document.getElementById('notifyStatus').textContent = 'Notifications enabled';
+                document.getElementById('notifyStatus').textContent = '✅ Notifications enabled';
                 logDebug('Subscribed');
             });
         })
         .catch(err => {
-            document.getElementById('notifyStatus').textContent = 'Error: ' + err.message;
+            document.getElementById('notifyStatus').textContent = '❌ ' + err.message;
             logDebug('Push error: ' + err.message);
         });
 }
@@ -670,12 +681,14 @@ function urlBase64ToUint8Array(base64String) {
     return outputArray;
 }
 
+// Register service worker
 if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('/sw.js')
         .then(() => logDebug('SW registered'))
         .catch(err => logDebug('SW reg error: ' + err));
 }
 
+// Auto-load on start
 window.onload = function() {
     fetchByLocation();
 };
@@ -684,7 +697,7 @@ window.onload = function() {
 </html>
 """
 
-# ---------- Routes ----------
+# ===== FLASK ROUTES =====
 @app.route('/')
 def index():
     return render_template_string(HTML_TEMPLATE)
@@ -707,9 +720,9 @@ def sw():
 self.addEventListener('install', e => e.waitUntil(self.skipWaiting()));
 self.addEventListener('activate', e => e.waitUntil(self.clients.claim()));
 self.addEventListener('push', e => {
-    const data = e.data ? e.data.json() : {title: 'Weather Alert', body: 'Check weather'};
+    const data = e.data ? e.data.json() : {title: '⚠️ Weather Alert', body: 'Check your weather'};
     e.waitUntil(
-        self.registration.showNotification(data.title || 'Weather Alert', {
+        self.registration.showNotification(data.title || '⚠️ Weather Alert', {
             body: data.body || 'Severe weather possible',
             icon: '/icon.png',
             tag: 'weather-alert'
@@ -770,7 +783,7 @@ def subscribe():
         return jsonify({"status": "ok"})
     return jsonify({"error": "Invalid"}), 400
 
-# ---------- Backend functions ----------
+# ===== BACKEND FUNCTIONS =====
 def geocode_zip(zip_code):
     url = f"http://api.openweathermap.org/geo/1.0/zip?zip={zip_code},US&appid={API_KEY}"
     resp = requests.get(url, timeout=10)
