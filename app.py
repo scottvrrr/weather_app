@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# app.py - Interactive Weather Hub with Admin Panel, NWS Alerts, Themes
+# app.py - Multi‑ZIP Weather Hub with Admin Panel, Custom Push, NWS Alerts
 import requests
 import os
 import logging
@@ -26,7 +26,6 @@ HTML_TEMPLATE = """
     <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
     <link rel="manifest" href="/manifest.json">
     <style id="theme-style">
-        /* Default: Apple Dark */
         :root {
             --bg: #0a0e14;
             --text: #e8edf3;
@@ -53,7 +52,6 @@ HTML_TEMPLATE = """
             transition: background var(--transition), color var(--transition);
         }
         .app { max-width: 500px; width: 100%; margin: 0 auto; }
-        /* Theme bar */
         .theme-bar {
             display: flex;
             gap: 6px;
@@ -74,7 +72,6 @@ HTML_TEMPLATE = """
         }
         .theme-btn:hover { background: var(--accent); color: white; border-color: var(--accent); }
         .theme-btn.active { background: var(--accent); color: white; border-color: var(--accent); }
-        /* Header (triple-click for admin) */
         .header {
             display: flex;
             justify-content: space-between;
@@ -98,7 +95,6 @@ HTML_TEMPLATE = """
             margin-left: 4px;
         }
         .header-actions button:hover { background: var(--accent); color: white; }
-        /* Search */
         .search-row {
             display: flex;
             gap: 6px;
@@ -131,7 +127,6 @@ HTML_TEMPLATE = """
         .search-row button:hover { filter: brightness(1.1); }
         .search-row .loc-btn { background: var(--card-bg); color: var(--text); border: 1px solid var(--border); }
         .search-row .loc-btn:hover { background: var(--accent); color: white; }
-        /* Notify */
         .notify-btn {
             background: var(--card-bg);
             border: 1px solid var(--border);
@@ -146,7 +141,6 @@ HTML_TEMPLATE = """
             text-align: center;
         }
         .notify-btn:hover { background: var(--accent); color: white; }
-        /* Alert banner */
         .alert-banner {
             background: rgba(255,200,50,0.12);
             border: 1px solid #ffcc44;
@@ -160,7 +154,34 @@ HTML_TEMPLATE = """
         .alert-banner:hover { background: rgba(255,200,50,0.2); }
         .alert-banner .alert-title { font-weight: 600; color: #ffcc44; }
         .alert-banner .alert-desc { font-size: 0.8rem; color: var(--secondary); }
-        /* Current card */
+        /* Location manager */
+        .loc-manager {
+            background: var(--card-bg);
+            border-radius: 16px;
+            padding: 12px;
+            margin-bottom: 14px;
+            border: 1px solid var(--border);
+        }
+        .loc-manager .row {
+            display: flex;
+            gap: 6px;
+            margin-bottom: 8px;
+        }
+        .loc-manager .row input { flex: 1; padding: 8px 12px; border-radius: 20px; border: 1px solid var(--border); background: var(--bg); color: var(--text); }
+        .loc-manager .row button { padding: 8px 16px; border-radius: 20px; border: none; background: var(--accent); color: white; cursor: pointer; }
+        .loc-tags { display: flex; flex-wrap: wrap; gap: 6px; }
+        .loc-tag {
+            background: var(--glass);
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 0.8rem;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            border: 1px solid var(--border);
+        }
+        .loc-tag .del { cursor: pointer; opacity: 0.6; }
+        .loc-tag .del:hover { opacity: 1; color: #ff6b6b; }
         .current-card {
             background: var(--card-bg);
             backdrop-filter: blur(20px);
@@ -244,7 +265,6 @@ HTML_TEMPLATE = """
         .day-item .day-temps .high { color: var(--text); }
         .day-item .day-temps .low { color: var(--secondary); margin-left: 6px; }
         .day-item .day-pop { font-size: 0.75rem; color: var(--accent); width: 45px; text-align: right; }
-        /* Modal */
         .modal {
             display: none;
             position: fixed;
@@ -280,7 +300,6 @@ HTML_TEMPLATE = """
             width: 100%;
         }
         .modal-content .close-btn:hover { filter: brightness(1.1); }
-        /* Loading / Error */
         .loading-state { text-align: center; padding: 30px 0; color: var(--secondary); }
         .error-state { background: rgba(255,70,70,0.08); border: 1px solid rgba(255,70,70,0.2); border-radius: 16px; padding: 16px; color: #ff7a7a; text-align: center; }
         .debug-box {
@@ -297,7 +316,6 @@ HTML_TEMPLATE = """
             border: 1px solid var(--border);
         }
         .notify-status { font-size: 0.7rem; color: var(--secondary); text-align: center; margin-top: 4px; }
-        /* Admin panel – hidden by default */
         .admin-panel {
             background: var(--card-bg);
             border: 1px solid var(--border);
@@ -307,6 +325,17 @@ HTML_TEMPLATE = """
             display: none;
         }
         .admin-panel h4 { font-size: 0.9rem; margin-bottom: 8px; color: var(--accent); }
+        .admin-panel .row { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin-bottom: 6px; }
+        .admin-panel input, .admin-panel textarea {
+            background: var(--bg);
+            border: 1px solid var(--border);
+            color: var(--text);
+            padding: 6px 10px;
+            border-radius: 12px;
+            flex: 1;
+            min-width: 120px;
+            font-size: 0.8rem;
+        }
         .admin-panel button {
             background: var(--card-bg);
             border: 1px solid var(--border);
@@ -314,8 +343,8 @@ HTML_TEMPLATE = """
             padding: 6px 14px;
             border-radius: 20px;
             cursor: pointer;
-            margin: 4px 4px 0 0;
             font-size: 0.75rem;
+            transition: 0.2s;
         }
         .admin-panel button:hover { background: var(--accent); color: white; }
         .admin-panel .log-area {
@@ -352,30 +381,32 @@ HTML_TEMPLATE = """
         <h1>⛅ Weather Hub</h1>
         <div class="header-actions">
             <button onclick="fetchByLocation()" title="My Location">📍</button>
-            <button onclick="refreshWeather()" title="Refresh">⟳</button>
+            <button onclick="refreshAll()" title="Refresh All">⟳</button>
         </div>
     </div>
 
-    <!-- Search -->
-    <div class="search-row">
-        <input id="zipInput" placeholder="ZIP code (e.g., 43065)" value="">
-        <button onclick="fetchByZip()">Search</button>
-        <button class="loc-btn" onclick="fetchByLocation()">📍</button>
+    <!-- Location Manager -->
+    <div class="loc-manager">
+        <div class="row">
+            <input id="newZip" placeholder="Add ZIP (e.g., 43065)" value="">
+            <button onclick="addZip()">➕ Add</button>
+        </div>
+        <div class="loc-tags" id="zipTags"></div>
     </div>
 
     <!-- Notifications -->
     <button class="notify-btn" id="notifyBtn" onclick="subscribePush()">🔔 Enable Notifications</button>
     <div class="notify-status" id="notifyStatus">Get severe weather alerts via push</div>
 
-    <!-- Alert Banner -->
+    <!-- Alert Banner (aggregated) -->
     <div class="alert-banner" id="alertBanner" onclick="showAlertModal()">
         <div class="alert-title" id="alertTitle">⚠️ Weather Alert</div>
         <div class="alert-desc" id="alertDesc">Click for details</div>
     </div>
 
-    <!-- Main content -->
+    <!-- Main content (list of locations) -->
     <div id="content">
-        <div class="loading-state">Enter a ZIP or tap location</div>
+        <div class="loading-state">Add a ZIP or use your location</div>
     </div>
 
     <!-- Modals -->
@@ -388,7 +419,7 @@ HTML_TEMPLATE = """
     </div>
     <div class="modal" id="alertModal">
         <div class="modal-content">
-            <h2>⚠️ NWS Alert</h2>
+            <h2>⚠️ NWS Alerts</h2>
             <div id="alertBody"></div>
             <button class="close-btn" onclick="closeAlertModal()">Close</button>
         </div>
@@ -397,10 +428,16 @@ HTML_TEMPLATE = """
     <!-- Admin Panel (hidden) -->
     <div class="admin-panel" id="adminPanel">
         <h4>🛠️ Admin Panel</h4>
-        <button onclick="testAlert()">🔔 Test Alert</button>
-        <button onclick="refreshWeather()">🔄 Force Refresh</button>
-        <button onclick="triggerPush()">📲 Send Test Push</button>
-        <button onclick="clearLogs()">🗑️ Clear Log</button>
+        <div class="row">
+            <input id="customPushTitle" placeholder="Push Title" value="Custom Message">
+            <input id="customPushBody" placeholder="Push Body" value="This is a test push from admin.">
+            <button onclick="sendCustomPush()">📲 Send Custom Push</button>
+        </div>
+        <div style="display:flex; gap:6px; flex-wrap:wrap; margin-top:6px;">
+            <button onclick="testAlert()">🔔 Test Alert</button>
+            <button onclick="refreshAll()">🔄 Refresh All</button>
+            <button onclick="clearLogs()">🗑️ Clear Log</button>
+        </div>
         <div class="log-area" id="adminLog">Ready.</div>
     </div>
 
@@ -469,22 +506,21 @@ function applyTheme(name) {
     });
     localStorage.setItem('weatherTheme', name);
 }
-
 document.querySelectorAll('.theme-btn').forEach(btn => {
     btn.addEventListener('click', () => applyTheme(btn.dataset.theme));
 });
-const saved = localStorage.getItem('weatherTheme') || 'apple-dark';
-applyTheme(saved);
+const savedTheme = localStorage.getItem('weatherTheme') || 'apple-dark';
+applyTheme(savedTheme);
 
 // ===== STATE =====
-let currentLat = null, currentLon = null;
-let hourlyData = [];
-let currentAlerts = [];
-let clickCount = 0;
-let clickTimer = null;
+let zipList = JSON.parse(localStorage.getItem('weatherZips') || '[]');
+let allWeatherData = {}; // keyed by zip
+let allAlerts = {}; // keyed by zip
+let hourlyDataForModal = [];
+let clickCount = 0, clickTimer = null;
 
-// ===== ADMIN PANEL TOGGLE (triple-click header) =====
-document.getElementById('headerTitle').addEventListener('click', function(e) {
+// ===== ADMIN PANEL TOGGLE =====
+document.getElementById('headerTitle').addEventListener('click', function() {
     clickCount++;
     clearTimeout(clickTimer);
     clickTimer = setTimeout(() => { clickCount = 0; }, 500);
@@ -502,7 +538,7 @@ function adminLog(msg) {
     log.scrollTop = log.scrollHeight;
 }
 
-// ===== LOGGING =====
+// ===== DEBUG LOGGING =====
 function logDebug(msg) {
     const el = document.getElementById('debug');
     el.style.display = 'block';
@@ -535,18 +571,132 @@ function formatDay(isoDate) {
     return days[d.getUTCDay()];
 }
 
-// ===== RENDER WEATHER =====
-function renderWeather(data) {
+// ===== ZIP MANAGEMENT =====
+function saveZips() {
+    localStorage.setItem('weatherZips', JSON.stringify(zipList));
+    renderZipTags();
+}
+
+function renderZipTags() {
+    const container = document.getElementById('zipTags');
+    if (zipList.length === 0) {
+        container.innerHTML = '<span style="opacity:0.5;font-size:0.8rem;">No ZIPs added. Use the field above.</span>';
+        return;
+    }
+    let html = '';
+    zipList.forEach(z => {
+        html += `<span class="loc-tag">${z} <span class="del" onclick="removeZip('${z}')">✕</span></span>`;
+    });
+    container.innerHTML = html;
+}
+
+window.addZip = function() {
+    const input = document.getElementById('newZip');
+    const z = input.value.trim();
+    if (!z) return alert('Enter a ZIP code');
+    if (zipList.includes(z)) return alert('Already added');
+    zipList.push(z);
+    saveZips();
+    input.value = '';
+    refreshAll();
+};
+
+window.removeZip = function(zip) {
+    zipList = zipList.filter(z => z !== zip);
+    saveZips();
+    refreshAll();
+};
+
+// ===== WEATHER FETCH FOR A SINGLE ZIP =====
+function fetchWeatherForZip(zip) {
+    return fetch('/api/zip?zip=' + zip)
+        .then(r => r.json())
+        .then(data => {
+            if (data.error) throw new Error(data.error);
+            return fetch('/api/weather?lat=' + data.lat + '&lon=' + data.lon)
+                .then(r => r.json())
+                .then(wdata => {
+                    if (wdata.error) throw new Error(wdata.error);
+                    // Also fetch alerts for this zip
+                    return fetch('/api/nws?lat=' + data.lat + '&lon=' + data.lon)
+                        .then(r => r.json())
+                        .then(alertData => {
+                            return { weather: wdata, alerts: alertData.alerts || [], zip: zip };
+                        });
+                });
+        });
+}
+
+// ===== REFRESH ALL =====
+window.refreshAll = function() {
+    if (zipList.length === 0) {
+        document.getElementById('content').innerHTML = '<div class="loading-state">Add a ZIP to see weather</div>';
+        return;
+    }
+    showLoading('Fetching ' + zipList.length + ' locations...');
+    const promises = zipList.map(z => fetchWeatherForZip(z).catch(err => {
+        logDebug('Error for ' + z + ': ' + err.message);
+        return { weather: null, alerts: [], zip: z, error: err.message };
+    }));
+    Promise.all(promises).then(results => {
+        let combinedAlerts = [];
+        let allHtml = '';
+        results.forEach(res => {
+            if (res.error) {
+                allHtml += `<div class="current-card" style="border-color:#ff6b6b;"><strong>${res.zip}</strong> — Error: ${res.error}</div>`;
+                return;
+            }
+            const w = res.weather;
+            const alerts = res.alerts;
+            if (alerts.length > 0) combinedAlerts = combinedAlerts.concat(alerts.map(a => ({...a, zip: res.zip})));
+            allHtml += renderOneLocation(w, res.zip);
+        });
+        document.getElementById('content').innerHTML = allHtml;
+        // Show alert banner if any alerts
+        if (combinedAlerts.length > 0) {
+            currentAlerts = combinedAlerts;
+            const banner = document.getElementById('alertBanner');
+            banner.style.display = 'block';
+            document.getElementById('alertTitle').textContent = '⚠️ ' + combinedAlerts.length + ' Alert(s)';
+            document.getElementById('alertDesc').textContent = combinedAlerts[0].headline || combinedAlerts[0].event;
+            // Push notification
+            if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
+                navigator.serviceWorker.ready.then(reg => {
+                    reg.showNotification('⚠️ Weather Alert', {
+                        body: combinedAlerts[0].headline || combinedAlerts[0].event,
+                        icon: '/icon.png',
+                        tag: 'nws-alert'
+                    });
+                });
+            }
+        } else {
+            document.getElementById('alertBanner').style.display = 'none';
+            currentAlerts = [];
+        }
+        logDebug('Refreshed ' + zipList.length + ' locations');
+        adminLog('Refreshed all locations');
+    }).catch(err => {
+        showError('Refresh failed: ' + err.message);
+    });
+};
+
+// ===== RENDER ONE LOCATION CARD =====
+function renderOneLocation(data, zip) {
     const c = data.current;
     const hourly = data.hourly;
     const daily = data.daily;
-    hourlyData = hourly;
+    // Store hourly data for modal (associate with zip)
+    // We'll store globally keyed by zip
+    window.hourlyDataMap = window.hourlyDataMap || {};
+    window.hourlyDataMap[zip] = hourly;
 
-    let html = '';
-    html += '<div class="current-card">';
+    let html = `<div class="current-card" data-zip="${zip}">`;
+    html += `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+        <strong style="font-size:1.2rem;">📍 ${zip}</strong>
+        <span style="font-size:0.8rem;color:var(--secondary);">${c.description}</span>
+    </div>`;
     html += '<div class="temp-row"><div>';
     html += '<div class="temp-main">' + Math.round(c.temp) + '°<small>F</small></div>';
-    html += '<div class="condition-text">' + c.description + '</div>';
     html += '<div class="high-low">H: ' + Math.round(c.temp_max) + '° · L: ' + Math.round(c.temp_min) + '°</div>';
     html += '</div><div style="font-size:3.8rem;">' + getIcon(c.description) + '</div></div>';
 
@@ -562,13 +712,13 @@ function renderWeather(data) {
     html += '<div style="margin-top:10px; font-size:0.75rem; color:var(--secondary); display:flex; justify-content:space-between;">';
     html += '<span>☀️ Rise ' + c.sunrise.slice(11,16) + '</span>';
     html += '<span>🌇 Set ' + c.sunset.slice(11,16) + '</span>';
-    html += '</div></div>';
+    html += '</div>';
 
-    // Hourly
-    html += '<div class="section-title"><h3>Hourly</h3><span>click for details</span></div>';
+    // Hourly (clickable)
+    html += '<div class="section-title" style="margin-top:12px;"><h3>Hourly</h3><span>click for details</span></div>';
     html += '<div class="hourly-scroll">';
     hourly.slice(0,8).forEach((h, idx) => {
-        html += '<div class="hour-item" onclick="showHourDetail(' + idx + ')">';
+        html += '<div class="hour-item" onclick="showHourDetail(\'' + zip + '\',' + idx + ')">';
         html += '<div class="time">' + h.time.slice(11,16) + '</div>';
         html += '<div class="icon">' + getIcon(h.description) + '</div>';
         html += '<div class="temp">' + Math.round(h.temp) + '°</div>';
@@ -577,7 +727,7 @@ function renderWeather(data) {
     });
     html += '</div>';
 
-    // Daily
+    // Daily (5-day)
     html += '<div class="section-title"><h3>5-Day Forecast</h3></div><div class="daily-list">';
     daily.forEach(d => {
         const dayName = (d.date === new Date().toISOString().slice(0,10)) ? 'Today' : formatDay(d.date);
@@ -590,16 +740,17 @@ function renderWeather(data) {
     });
     html += '</div>';
 
-    document.getElementById('content').innerHTML = html;
-    logDebug('Display updated');
+    html += '</div>';
+    return html;
 }
 
-// ===== MODAL: HOURLY =====
-function showHourDetail(idx) {
-    const h = hourlyData[idx];
-    if (!h) return;
+// ===== MODAL: HOURLY DETAIL =====
+function showHourDetail(zip, idx) {
+    const hourly = window.hourlyDataMap && window.hourlyDataMap[zip];
+    if (!hourly || !hourly[idx]) return;
+    const h = hourly[idx];
     const modal = document.getElementById('hourModal');
-    document.getElementById('modalTitle').textContent = '🕒 ' + h.time.slice(11,16);
+    document.getElementById('modalTitle').textContent = '🕒 ' + h.time.slice(11,16) + ' (' + zip + ')';
     let body = '';
     body += '<p><strong>Temp:</strong> ' + Math.round(h.temp) + '°F</p>';
     body += '<p><strong>Condition:</strong> ' + h.description + '</p>';
@@ -619,56 +770,15 @@ function closeModal() {
     document.getElementById('hourModal').classList.remove('active');
 }
 
-// ===== NWS ALERTS =====
-function fetchAlerts(lat, lon) {
-    logDebug('Fetching NWS alerts...');
-    fetch('/api/nws?lat=' + lat + '&lon=' + lon)
-        .then(r => r.json())
-        .then(data => {
-            if (data.error) {
-                logDebug('NWS error: ' + data.error);
-                // If NWS fails, we can optionally show a test alert via admin
-                return;
-            }
-            if (data.alerts && data.alerts.length > 0) {
-                currentAlerts = data.alerts;
-                const banner = document.getElementById('alertBanner');
-                banner.style.display = 'block';
-                document.getElementById('alertTitle').textContent = '⚠️ ' + data.alerts.length + ' Alert(s)';
-                document.getElementById('alertDesc').textContent = data.alerts[0].headline || data.alerts[0].event;
-                // Push notification
-                if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
-                    navigator.serviceWorker.ready.then(reg => {
-                        reg.showNotification('⚠️ Weather Alert', {
-                            body: data.alerts[0].headline || data.alerts[0].event,
-                            icon: '/icon.png',
-                            tag: 'nws-alert'
-                        });
-                    });
-                }
-                logDebug('Displayed ' + data.alerts.length + ' alerts');
-            } else {
-                document.getElementById('alertBanner').style.display = 'none';
-                logDebug('No alerts for this location');
-            }
-        })
-        .catch(err => {
-            logDebug('NWS fetch error: ' + err.message);
-            // Fallback: show a demo alert if we want to test UI
-        });
-}
-
+// ===== ALERT MODAL =====
+let currentAlerts = [];
 function showAlertModal() {
-    if (currentAlerts.length === 0) {
-        // If no real alerts, offer to show a test alert from admin
-        alert('No active alerts. Use Admin Panel to test.');
-        return;
-    }
+    if (currentAlerts.length === 0) return;
     const modal = document.getElementById('alertModal');
     let html = '';
     currentAlerts.forEach(a => {
         html += '<div style="margin-bottom:12px; border-bottom:1px solid var(--border); padding-bottom:8px;">';
-        html += '<strong>' + a.event + '</strong><br>';
+        html += '<strong>' + a.event + '</strong> <span style="font-size:0.7rem;color:var(--secondary);">(' + (a.zip || '') + ')</span><br>';
         html += '<span style="font-size:0.8rem;color:var(--secondary);">' + (a.headline || '') + '</span><br>';
         html += '<span style="font-size:0.75rem;">' + (a.description ? a.description.slice(0,200) + '...' : '') + '</span>';
         html += '</div>';
@@ -680,73 +790,46 @@ function closeAlertModal() {
     document.getElementById('alertModal').classList.remove('active');
 }
 
-// ===== WEATHER FETCH =====
-function fetchWeather(lat, lon) {
-    currentLat = lat; currentLon = lon;
-    logDebug('Fetching weather...');
-    showLoading('Fetching weather...');
-    fetch('/api/weather?lat=' + lat + '&lon=' + lon)
-        .then(r => r.json())
-        .then(data => {
-            if (data.error) throw new Error(data.error);
-            renderWeather(data);
-            // Now fetch alerts
-            fetchAlerts(lat, lon);
-        })
-        .catch(err => {
-            logDebug('Error: ' + err.message);
-            showError(err.message);
-        });
-}
-
-window.fetchByZip = function() {
-    const zip = document.getElementById('zipInput').value.trim();
-    if (!zip) { alert('Enter a ZIP code'); return; }
-    logDebug('ZIP: ' + zip);
-    showLoading('Looking up ZIP...');
-    fetch('/api/zip?zip=' + zip)
-        .then(r => r.json())
-        .then(data => {
-            if (data.error) throw new Error(data.error);
-            fetchWeather(data.lat, data.lon);
-        })
-        .catch(err => {
-            logDebug('ZIP error: ' + err.message);
-            showError('ZIP: ' + err.message);
-        });
-};
-
+// ===== LOCATION (GPS) =====
 window.fetchByLocation = function() {
     if (!navigator.geolocation) {
         alert('Geolocation not supported');
         return;
     }
-    showLoading('Getting location...');
     navigator.geolocation.getCurrentPosition(
-        pos => fetchWeather(pos.coords.latitude, pos.coords.longitude),
-        err => {
-            logDebug('Geolocation error: ' + err.message);
-            showError('Location: ' + err.message);
-        }
+        pos => {
+            // Convert lat/lon to ZIP via reverse geocode (we'll use a simple approach: just add to list?)
+            // Actually we can fetch weather directly and add a dummy entry? But we'll keep it simple: we add current location as a special entry? 
+            // For multi-zip, we can add "Current Location" as a ZIP placeholder. But we need a ZIP code. We'll just fetch weather for lat/lon and display as "My Location".
+            // We'll treat it as a temporary location, not stored in list.
+            showLoading('Getting weather for your location...');
+            fetch('/api/weather?lat=' + pos.coords.latitude + '&lon=' + pos.coords.longitude)
+                .then(r => r.json())
+                .then(data => {
+                    if (data.error) throw new Error(data.error);
+                    // Create a dummy card with "My Location"
+                    const dummyZip = '📍 My Location';
+                    const html = renderOneLocation(data, dummyZip);
+                    // Prepend to content
+                    const content = document.getElementById('content');
+                    content.innerHTML = html + content.innerHTML;
+                    logDebug('Added current location');
+                })
+                .catch(err => showError('Location error: ' + err.message));
+        },
+        err => showError('Geolocation error: ' + err.message)
     );
 };
 
-window.refreshWeather = function() {
-    if (currentLat && currentLon) {
-        fetchWeather(currentLat, currentLon);
-    } else {
-        fetchByLocation();
-    }
-};
-
-// ===== TEST ALERT (Admin) =====
+// ===== ADMIN: TEST ALERT =====
 window.testAlert = function() {
     const testData = [{
         event: 'Test Alert',
         headline: 'This is a simulated NWS alert for testing',
-        description: 'This alert is generated by the admin panel to demonstrate the UI. No actual weather warning exists.',
+        description: 'This alert is generated by the admin panel. No actual weather warning exists.',
         severity: 'Test',
-        effective: new Date().toISOString()
+        effective: new Date().toISOString(),
+        zip: 'TEST'
     }];
     currentAlerts = testData;
     const banner = document.getElementById('alertBanner');
@@ -754,7 +837,6 @@ window.testAlert = function() {
     document.getElementById('alertTitle').textContent = '⚠️ TEST Alert';
     document.getElementById('alertDesc').textContent = 'Simulated NWS alert – click for details';
     adminLog('Test alert displayed');
-    // Also trigger push if subscribed
     if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
         navigator.serviceWorker.ready.then(reg => {
             reg.showNotification('⚠️ TEST Alert', {
@@ -766,25 +848,22 @@ window.testAlert = function() {
     }
 };
 
-window.triggerPush = function() {
-    if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
-        navigator.serviceWorker.ready.then(reg => {
-            reg.showNotification('📢 Admin Test', {
-                body: 'This push was triggered from the admin panel.',
-                icon: '/icon.png',
-                tag: 'admin-test'
-            });
-            adminLog('Test push sent');
-        });
-    } else {
+// ===== ADMIN: CUSTOM PUSH =====
+window.sendCustomPush = function() {
+    const title = document.getElementById('customPushTitle').value || 'Custom Message';
+    const body = document.getElementById('customPushBody').value || 'This is a test push.';
+    if (!('serviceWorker' in navigator) || !navigator.serviceWorker.controller) {
         alert('Service worker not active. Enable notifications first.');
+        return;
     }
-};
-
-window.clearLogs = function() {
-    document.getElementById('adminLog').innerHTML = 'Cleared.';
-    document.getElementById('debug').innerHTML = '';
-    document.getElementById('debug').style.display = 'none';
+    navigator.serviceWorker.ready.then(reg => {
+        reg.showNotification(title, {
+            body: body,
+            icon: '/icon.png',
+            tag: 'custom-push'
+        });
+        adminLog('Custom push sent: ' + title);
+    });
 };
 
 // ===== PUSH NOTIFICATIONS =====
@@ -838,10 +917,21 @@ if ('serviceWorker' in navigator) {
         .catch(err => logDebug('SW reg error: ' + err));
 }
 
-// Auto-load on start
+// ===== AUTO-LOAD ON START =====
 window.onload = function() {
-    fetchByLocation();
-    adminLog('App loaded');
+    renderZipTags();
+    if (zipList.length > 0) {
+        refreshAll();
+    } else {
+        document.getElementById('content').innerHTML = '<div class="loading-state">Add a ZIP or tap location</div>';
+    }
+    adminLog('App loaded with ' + zipList.length + ' ZIPs');
+};
+
+window.clearLogs = function() {
+    document.getElementById('adminLog').innerHTML = 'Cleared.';
+    document.getElementById('debug').innerHTML = '';
+    document.getElementById('debug').style.display = 'none';
 };
 </script>
 </body>
@@ -1007,7 +1097,6 @@ def get_weather_data(lat, lon):
     return {"current": current, "hourly": hourly, "daily": daily}
 
 def get_nws_alerts(lat, lon):
-    # Proper User-Agent required by NWS API
     headers = {
         "User-Agent": "WeatherHub/1.0 (https://your-app.railway.app; scottvrrr@gmail.com)",
         "Accept": "application/json"
