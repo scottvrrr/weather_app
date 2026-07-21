@@ -1,13 +1,12 @@
-# app.py - Full interactive weather with push notifications, themes, NWS alerts
+# -*- coding: utf-8 -*-
+# app.py - Interactive Weather Hub (ASCII safe, all features)
 import requests
 import os
 import json
 import logging
-from flask import Flask, render_template_string, request, jsonify, send_file
-from datetime import datetime, timezone, timedelta
+from flask import Flask, render_template_string, request, jsonify
+from datetime import datetime, timezone
 from dotenv import load_dotenv
-import threading
-import time
 
 load_dotenv()
 API_KEY = os.getenv("OWM_API_KEY")
@@ -17,10 +16,8 @@ if not API_KEY:
 app = Flask(__name__)
 logging.basicConfig(level=logging.INFO)
 
-# In-memory store for subscription (for demo – use DB in production)
 subscriptions = []
 
-# ---------- HTML with all features ----------
 HTML_TEMPLATE = """
 <!DOCTYPE html>
 <html>
@@ -57,7 +54,6 @@ HTML_TEMPLATE = """
             transition: background var(--transition), color var(--transition);
         }
         .app { max-width: 500px; width: 100%; margin: 0 auto; }
-        /* Theme bar */
         .theme-bar {
             display: flex;
             gap: 6px;
@@ -78,7 +74,6 @@ HTML_TEMPLATE = """
         }
         .theme-btn:hover { background: var(--accent); color: white; border-color: var(--accent); }
         .theme-btn.active { background: var(--accent); color: white; border-color: var(--accent); }
-        /* Header */
         .header {
             display: flex;
             justify-content: space-between;
@@ -100,7 +95,6 @@ HTML_TEMPLATE = """
             margin-left: 4px;
         }
         .header-actions button:hover { background: var(--accent); color: white; }
-        /* Search */
         .search-row {
             display: flex;
             gap: 6px;
@@ -133,7 +127,6 @@ HTML_TEMPLATE = """
         .search-row button:hover { filter: brightness(1.1); }
         .search-row .loc-btn { background: var(--card-bg); color: var(--text); border: 1px solid var(--border); }
         .search-row .loc-btn:hover { background: var(--accent); color: white; }
-        /* Notify button */
         .notify-btn {
             background: var(--card-bg);
             border: 1px solid var(--border);
@@ -148,7 +141,6 @@ HTML_TEMPLATE = """
             text-align: center;
         }
         .notify-btn:hover { background: var(--accent); color: white; }
-        /* Alert banner */
         .alert-banner {
             background: rgba(255,200,50,0.12);
             border: 1px solid #ffcc44;
@@ -162,7 +154,6 @@ HTML_TEMPLATE = """
         .alert-banner:hover { background: rgba(255,200,50,0.2); }
         .alert-banner .alert-title { font-weight: 600; color: #ffcc44; }
         .alert-banner .alert-desc { font-size: 0.8rem; color: var(--secondary); }
-        /* Current card */
         .current-card {
             background: var(--card-bg);
             backdrop-filter: blur(20px);
@@ -189,7 +180,6 @@ HTML_TEMPLATE = """
         .extra-detail { text-align: center; }
         .extra-detail .label { font-size: 0.65rem; text-transform: uppercase; color: var(--secondary); letter-spacing: 0.5px; }
         .extra-detail .value { font-size: 1rem; font-weight: 500; margin-top: 2px; }
-        /* Hourly scroll - clickable items */
         .section-title {
             display: flex;
             justify-content: space-between;
@@ -224,7 +214,6 @@ HTML_TEMPLATE = """
         .hour-item .temp { font-size: 1.1rem; font-weight: 500; margin: 2px 0; }
         .hour-item .icon { font-size: 1.2rem; }
         .hour-item .pop { font-size: 0.65rem; color: var(--accent); }
-        /* Daily list */
         .daily-list {
             display: flex;
             flex-direction: column;
@@ -247,7 +236,6 @@ HTML_TEMPLATE = """
         .day-item .day-temps .high { color: var(--text); }
         .day-item .day-temps .low { color: var(--secondary); margin-left: 6px; }
         .day-item .day-pop { font-size: 0.75rem; color: var(--accent); width: 45px; text-align: right; }
-        /* Modal for hour detail */
         .modal {
             display: none;
             position: fixed;
@@ -283,7 +271,6 @@ HTML_TEMPLATE = """
             width: 100%;
         }
         .modal-content .close-btn:hover { filter: brightness(1.1); }
-        /* States */
         .loading-state { text-align: center; padding: 30px 0; color: var(--secondary); }
         .error-state { background: rgba(255,70,70,0.08); border: 1px solid rgba(255,70,70,0.2); border-radius: 16px; padding: 16px; color: #ff7a7a; text-align: center; }
         .debug-box {
@@ -299,7 +286,6 @@ HTML_TEMPLATE = """
             font-family: monospace;
             border: 1px solid var(--border);
         }
-        /* Notification permission */
         .notify-status { font-size: 0.7rem; color: var(--secondary); text-align: center; margin-top: 4px; }
         @media (max-width: 480px) {
             .temp-main { font-size: 3rem; }
@@ -309,46 +295,39 @@ HTML_TEMPLATE = """
 </head>
 <body>
 <div class="app">
-    <!-- Theme Bar -->
     <div class="theme-bar">
-        <button class="theme-btn active" data-theme="apple-dark">🍎 Dark</button>
-        <button class="theme-btn" data-theme="apple-light">🍎 Light</button>
-        <button class="theme-btn" data-theme="retro">🖥 Retro</button>
-        <button class="theme-btn" data-theme="lightning">⚡ Lightning</button>
+        <button class="theme-btn active" data-theme="apple-dark">Apple Dark</button>
+        <button class="theme-btn" data-theme="apple-light">Apple Light</button>
+        <button class="theme-btn" data-theme="retro">Retro</button>
+        <button class="theme-btn" data-theme="lightning">Lightning</button>
     </div>
 
-    <!-- Header -->
     <div class="header">
-        <h1>⛅ Weather Hub</h1>
+        <h1>Weather Hub</h1>
         <div class="header-actions">
-            <button onclick="fetchByLocation()" title="My Location">📍</button>
-            <button onclick="refreshWeather()" title="Refresh">⟳</button>
+            <button onclick="fetchByLocation()" title="My Location">Loc</button>
+            <button onclick="refreshWeather()" title="Refresh">Ref</button>
         </div>
     </div>
 
-    <!-- Search -->
     <div class="search-row">
         <input id="zipInput" placeholder="ZIP code (e.g., 43065)" value="">
         <button onclick="fetchByZip()">Search</button>
-        <button class="loc-btn" onclick="fetchByLocation()">📍</button>
+        <button class="loc-btn" onclick="fetchByLocation()">Loc</button>
     </div>
 
-    <!-- Push notification subscription -->
-    <button class="notify-btn" id="notifyBtn" onclick="subscribePush()">🔔 Enable Notifications</button>
+    <button class="notify-btn" id="notifyBtn" onclick="subscribePush()">Enable Notifications</button>
     <div class="notify-status" id="notifyStatus">Tap to get alerts for severe weather</div>
 
-    <!-- NWS Alert Banner -->
     <div class="alert-banner" id="alertBanner" onclick="showAlertModal()">
-        <div class="alert-title" id="alertTitle">⚠️ Weather Alert</div>
+        <div class="alert-title" id="alertTitle">Weather Alert</div>
         <div class="alert-desc" id="alertDesc">Click for details</div>
     </div>
 
-    <!-- Main content -->
     <div id="content">
         <div class="loading-state">Enter a ZIP or tap location</div>
     </div>
 
-    <!-- Modal for hourly detail -->
     <div class="modal" id="hourModal">
         <div class="modal-content">
             <h2 id="modalTitle">Hour Detail</h2>
@@ -357,10 +336,9 @@ HTML_TEMPLATE = """
         </div>
     </div>
 
-    <!-- Modal for alert detail -->
     <div class="modal" id="alertModal">
         <div class="modal-content">
-            <h2>⚠️ NWS Alert</h2>
+            <h2>NWS Alert</h2>
             <div id="alertBody"></div>
             <button class="close-btn" onclick="closeAlertModal()">Close</button>
         </div>
@@ -370,7 +348,7 @@ HTML_TEMPLATE = """
 </div>
 
 <script>
-// ========== THEMES ==========
+// ===== Themes =====
 const themes = {
     'apple-dark': {
         '--bg': '#0a0e14',
@@ -426,7 +404,6 @@ function applyTheme(name) {
     for (let [key, val] of Object.entries(theme)) {
         root.style.setProperty(key, val);
     }
-    // Mark active button
     document.querySelectorAll('.theme-btn').forEach(btn => {
         btn.classList.toggle('active', btn.dataset.theme === name);
     });
@@ -436,16 +413,15 @@ function applyTheme(name) {
 document.querySelectorAll('.theme-btn').forEach(btn => {
     btn.addEventListener('click', () => applyTheme(btn.dataset.theme));
 });
-// Load saved theme
 const saved = localStorage.getItem('weatherTheme') || 'apple-dark';
 applyTheme(saved);
 
-// ========== STATE ==========
+// ===== State =====
 let currentLat = null;
 let currentLon = null;
-let hourlyData = []; // store for modal
+let hourlyData = [];
+let currentAlerts = [];
 
-// ========== DEBUG ==========
 function logDebug(msg) {
     const el = document.getElementById('debug');
     el.style.display = 'block';
@@ -453,23 +429,22 @@ function logDebug(msg) {
     el.scrollTop = el.scrollHeight;
 }
 
-// ========== UI HELPERS ==========
 function showLoading(text) {
-    document.getElementById('content').innerHTML = `<div class="loading-state">⏳ ${text}</div>`;
+    document.getElementById('content').innerHTML = '<div class="loading-state">' + text + '</div>';
 }
 function showError(msg) {
-    document.getElementById('content').innerHTML = `<div class="error-state">⚠️ ${msg}</div>`;
+    document.getElementById('content').innerHTML = '<div class="error-state">' + msg + '</div>';
     logDebug('ERROR: ' + msg);
 }
 function getIcon(desc) {
     const d = desc.toLowerCase();
-    if (d.includes('clear')) return '☀️';
-    if (d.includes('cloud')) return '☁️';
-    if (d.includes('rain')) return '🌧️';
-    if (d.includes('thunder')) return '⛈️';
-    if (d.includes('snow')) return '❄️';
-    if (d.includes('mist') || d.includes('fog')) return '🌫️';
-    return '🌤️';
+    if (d.includes('clear')) return 'SUN';
+    if (d.includes('cloud')) return 'CLD';
+    if (d.includes('rain')) return 'RAIN';
+    if (d.includes('thunder')) return 'TSTRM';
+    if (d.includes('snow')) return 'SNOW';
+    if (d.includes('mist') || d.includes('fog')) return 'FOG';
+    return '---';
 }
 function formatDay(isoDate) {
     const days = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
@@ -477,87 +452,78 @@ function formatDay(isoDate) {
     return days[d.getUTCDay()];
 }
 
-// ========== RENDER ==========
 function renderWeather(data) {
     const c = data.current;
     const hourly = data.hourly;
     const daily = data.daily;
-    hourlyData = hourly; // store for modal
+    hourlyData = hourly;
 
     let html = '';
-    // Current
-    html += `<div class="current-card">
-        <div class="temp-row">
-            <div>
-                <div class="temp-main">${Math.round(c.temp)}°<small>F</small></div>
-                <div class="condition-text">${c.description}</div>
-                <div class="high-low">H: ${Math.round(c.temp_max)}° · L: ${Math.round(c.temp_min)}°</div>
-            </div>
-            <div style="font-size:3.8rem;">${getIcon(c.description)}</div>
-        </div>
-        <div class="extra-details">
-            <div class="extra-detail"><div class="label">Feels Like</div><div class="value">${Math.round(c.feels_like)}°</div></div>
-            <div class="extra-detail"><div class="label">Humidity</div><div class="value">${c.humidity}%</div></div>
-            <div class="extra-detail"><div class="label">Wind</div><div class="value">${Math.round(c.wind_speed)} mph</div></div>
-            <div class="extra-detail"><div class="label">Pressure</div><div class="value">${c.pressure} hPa</div></div>
-            <div class="extra-detail"><div class="label">UV Index</div><div class="value">${c.uvi !== undefined ? c.uvi : '—'}</div></div>
-            <div class="extra-detail"><div class="label">Visibility</div><div class="value">${(c.visibility / 1609).toFixed(1)} mi</div></div>
-        </div>
-        <div style="margin-top:10px; font-size:0.75rem; color:var(--secondary); display:flex; justify-content:space-between;">
-            <span>☀️ Rise ${c.sunrise.slice(11,16)}</span>
-            <span>🌇 Set ${c.sunset.slice(11,16)}</span>
-        </div>
-    </div>`;
+    html += '<div class="current-card">';
+    html += '<div class="temp-row"><div>';
+    html += '<div class="temp-main">' + Math.round(c.temp) + '°<small>F</small></div>';
+    html += '<div class="condition-text">' + c.description + '</div>';
+    html += '<div class="high-low">H: ' + Math.round(c.temp_max) + '° L: ' + Math.round(c.temp_min) + '°</div>';
+    html += '</div><div style="font-size:3.8rem;">' + getIcon(c.description) + '</div></div>';
 
-    // Hourly scroll (clickable)
-    html += `<div class="section-title"><h3>Hourly</h3><span>click for details</span></div>
-    <div class="hourly-scroll">`;
+    html += '<div class="extra-details">';
+    html += '<div class="extra-detail"><div class="label">Feels Like</div><div class="value">' + Math.round(c.feels_like) + '°</div></div>';
+    html += '<div class="extra-detail"><div class="label">Humidity</div><div class="value">' + c.humidity + '%</div></div>';
+    html += '<div class="extra-detail"><div class="label">Wind</div><div class="value">' + Math.round(c.wind_speed) + ' mph</div></div>';
+    html += '<div class="extra-detail"><div class="label">Pressure</div><div class="value">' + c.pressure + ' hPa</div></div>';
+    html += '<div class="extra-detail"><div class="label">UV Index</div><div class="value">' + (c.uvi || '--') + '</div></div>';
+    html += '<div class="extra-detail"><div class="label">Visibility</div><div class="value">' + (c.visibility/1609).toFixed(1) + ' mi</div></div>';
+    html += '</div>';
+
+    html += '<div style="margin-top:10px; font-size:0.75rem; color:var(--secondary); display:flex; justify-content:space-between;">';
+    html += '<span>Sunrise ' + c.sunrise.slice(11,16) + '</span>';
+    html += '<span>Sunset ' + c.sunset.slice(11,16) + '</span>';
+    html += '</div></div>';
+
+    html += '<div class="section-title"><h3>Hourly</h3><span>click for details</span></div>';
+    html += '<div class="hourly-scroll">';
     hourly.slice(0,8).forEach((h, idx) => {
-        html += `<div class="hour-item" onclick="showHourDetail(${idx})">
-            <div class="time">${h.time.slice(11,16)}</div>
-            <div class="icon">${getIcon(h.description)}</div>
-            <div class="temp">${Math.round(h.temp)}°</div>
-            <div class="pop">${h.pop > 0 ? Math.round(h.pop*100)+'%' : ''}</div>
-        </div>`;
+        html += '<div class="hour-item" onclick="showHourDetail(' + idx + ')">';
+        html += '<div class="time">' + h.time.slice(11,16) + '</div>';
+        html += '<div class="icon">' + getIcon(h.description) + '</div>';
+        html += '<div class="temp">' + Math.round(h.temp) + '°</div>';
+        html += '<div class="pop">' + (h.pop > 0 ? Math.round(h.pop*100)+'%' : '') + '</div>';
+        html += '</div>';
     });
-    html += `</div>`;
+    html += '</div>';
 
-    // Daily
-    html += `<div class="section-title"><h3>5-Day Forecast</h3></div><div class="daily-list">`;
+    html += '<div class="section-title"><h3>5-Day Forecast</h3></div><div class="daily-list">';
     daily.forEach(d => {
-        const dayName = d.date === new Date().toISOString().slice(0,10) ? 'Today' : formatDay(d.date);
-        html += `<div class="day-item">
-            <span class="day-name">${dayName}</span>
-            <span class="day-icon">${getIcon(d.description)}</span>
-            <span class="day-temps"><span class="high">${Math.round(d.temp_max)}°</span><span class="low">${Math.round(d.temp_min)}°</span></span>
-            <span class="day-pop">${d.pop > 0 ? Math.round(d.pop*100)+'%' : ''}</span>
-        </div>`;
+        const dayName = (d.date === new Date().toISOString().slice(0,10)) ? 'Today' : formatDay(d.date);
+        html += '<div class="day-item">';
+        html += '<span class="day-name">' + dayName + '</span>';
+        html += '<span class="day-icon">' + getIcon(d.description) + '</span>';
+        html += '<span class="day-temps"><span class="high">' + Math.round(d.temp_max) + '°</span><span class="low">' + Math.round(d.temp_min) + '°</span></span>';
+        html += '<span class="day-pop">' + (d.pop > 0 ? Math.round(d.pop*100)+'%' : '') + '</span>';
+        html += '</div>';
     });
-    html += `</div>`;
+    html += '</div>';
 
     document.getElementById('content').innerHTML = html;
     logDebug('Display updated');
 }
 
-// ========== MODAL FOR HOUR DETAIL ==========
 function showHourDetail(idx) {
     const h = hourlyData[idx];
     if (!h) return;
     const modal = document.getElementById('hourModal');
-    document.getElementById('modalTitle').textContent = `⏰ ${h.time.slice(11,16)}`;
-    let body = `
-        <p><strong>Temp:</strong> ${Math.round(h.temp)}°F</p>
-        <p><strong>Condition:</strong> ${h.description}</p>
-        <p><strong>Rain chance:</strong> ${Math.round(h.pop*100)}%</p>
-        <p><strong>Wind:</strong> ${Math.round(h.wind_speed)} mph</p>
-        <p><strong>Humidity:</strong> ${h.humidity !== undefined ? h.humidity+'%' : '—'}</p>
-    `;
-    // If rain > 50%, estimate duration (dummy logic)
+    document.getElementById('modalTitle').textContent = 'Hour: ' + h.time.slice(11,16);
+    let body = '';
+    body += '<p><strong>Temp:</strong> ' + Math.round(h.temp) + '°F</p>';
+    body += '<p><strong>Condition:</strong> ' + h.description + '</p>';
+    body += '<p><strong>Rain chance:</strong> ' + Math.round(h.pop*100) + '%</p>';
+    body += '<p><strong>Wind:</strong> ' + Math.round(h.wind_speed) + ' mph</p>';
+    body += '<p><strong>Humidity:</strong> ' + (h.humidity || '--') + '%</p>';
     if (h.pop > 0.5) {
         const est = Math.round((h.pop * 2) * 10) / 10;
-        body += `<p><strong>🌧 Rain expected to last:</strong> ~${est} hours</p>`;
+        body += '<p><strong>Rain expected to last:</strong> ~' + est + ' hours</p>';
     } else {
-        body += `<p><strong>☀️ No significant rain expected</strong></p>`;
+        body += '<p><strong>No significant rain expected</strong></p>';
     }
     document.getElementById('modalBody').innerHTML = body;
     modal.classList.add('active');
@@ -566,19 +532,16 @@ function closeModal() {
     document.getElementById('hourModal').classList.remove('active');
 }
 
-// ========== NWS ALERTS ==========
-let currentAlerts = [];
 function fetchAlerts(lat, lon) {
-    fetch(`/api/nws?lat=${lat}&lon=${lon}`)
+    fetch('/api/nws?lat=' + lat + '&lon=' + lon)
         .then(r => r.json())
         .then(data => {
             if (data.alerts && data.alerts.length > 0) {
                 currentAlerts = data.alerts;
                 const banner = document.getElementById('alertBanner');
                 banner.style.display = 'block';
-                document.getElementById('alertTitle').textContent = `⚠️ ${data.alerts.length} Alert(s)`;
+                document.getElementById('alertTitle').textContent = 'Alert: ' + data.alerts.length;
                 document.getElementById('alertDesc').textContent = data.alerts[0].headline || data.alerts[0].event;
-                // Trigger notification if subscribed
                 if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
                     navigator.serviceWorker.ready.then(reg => {
                         reg.showNotification('Weather Alert', {
@@ -594,16 +557,17 @@ function fetchAlerts(lat, lon) {
         })
         .catch(err => logDebug('NWS error: ' + err.message));
 }
+
 function showAlertModal() {
     if (currentAlerts.length === 0) return;
     const modal = document.getElementById('alertModal');
     let html = '';
     currentAlerts.forEach(a => {
-        html += `<div style="margin-bottom:12px; border-bottom:1px solid var(--border); padding-bottom:8px;">
-            <strong>${a.event}</strong><br>
-            <span style="font-size:0.8rem;color:var(--secondary);">${a.headline || ''}</span><br>
-            <span style="font-size:0.75rem;">${a.description ? a.description.slice(0,200)+'...' : ''}</span>
-        </div>`;
+        html += '<div style="margin-bottom:12px; border-bottom:1px solid var(--border); padding-bottom:8px;">';
+        html += '<strong>' + a.event + '</strong><br>';
+        html += '<span style="font-size:0.8rem;color:var(--secondary);">' + (a.headline || '') + '</span><br>';
+        html += '<span style="font-size:0.75rem;">' + (a.description ? a.description.slice(0,200) + '...' : '') + '</span>';
+        html += '</div>';
     });
     document.getElementById('alertBody').innerHTML = html;
     modal.classList.add('active');
@@ -612,12 +576,11 @@ function closeAlertModal() {
     document.getElementById('alertModal').classList.remove('active');
 }
 
-// ========== WEATHER FETCH ==========
 function fetchWeather(lat, lon) {
     currentLat = lat; currentLon = lon;
-    logDebug('Fetching lat='+lat.toFixed(4)+' lon='+lon.toFixed(4));
+    logDebug('Fetching lat=' + lat.toFixed(4) + ' lon=' + lon.toFixed(4));
     showLoading('Fetching weather...');
-    fetch(`/api/weather?lat=${lat}&lon=${lon}`)
+    fetch('/api/weather?lat=' + lat + '&lon=' + lon)
         .then(r => r.json())
         .then(data => {
             if (data.error) throw new Error(data.error);
@@ -625,7 +588,7 @@ function fetchWeather(lat, lon) {
             fetchAlerts(lat, lon);
         })
         .catch(err => {
-            logDebug('Error: '+err.message);
+            logDebug('Error: ' + err.message);
             showError(err.message);
         });
 }
@@ -633,17 +596,17 @@ function fetchWeather(lat, lon) {
 window.fetchByZip = function() {
     const zip = document.getElementById('zipInput').value.trim();
     if (!zip) { alert('Enter a ZIP code'); return; }
-    logDebug('ZIP: '+zip);
+    logDebug('ZIP: ' + zip);
     showLoading('Looking up ZIP...');
-    fetch(`/api/zip?zip=${zip}`)
+    fetch('/api/zip?zip=' + zip)
         .then(r => r.json())
         .then(data => {
             if (data.error) throw new Error(data.error);
             fetchWeather(data.lat, data.lon);
         })
         .catch(err => {
-            logDebug('ZIP error: '+err.message);
-            showError('ZIP: '+err.message);
+            logDebug('ZIP error: ' + err.message);
+            showError('ZIP: ' + err.message);
         });
 };
 
@@ -656,8 +619,8 @@ window.fetchByLocation = function() {
     navigator.geolocation.getCurrentPosition(
         pos => fetchWeather(pos.coords.latitude, pos.coords.longitude),
         err => {
-            logDebug('Geolocation error: '+err.message);
-            showError('Location: '+err.message);
+            logDebug('Geolocation error: ' + err.message);
+            showError('Location: ' + err.message);
         }
     );
 };
@@ -670,35 +633,32 @@ window.refreshWeather = function() {
     }
 };
 
-// ========== PUSH NOTIFICATIONS ==========
 function subscribePush() {
     if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
-        document.getElementById('notifyStatus').textContent = '❌ Push not supported';
+        document.getElementById('notifyStatus').textContent = 'Push not supported';
         return;
     }
     navigator.serviceWorker.register('/sw.js')
         .then(reg => reg.pushManager.subscribe({
             userVisibleOnly: true,
-            applicationServerKey: urlBase64ToUint8Array('YOUR_VAPID_PUBLIC_KEY') // replace with real key
+            applicationServerKey: urlBase64ToUint8Array('YOUR_VAPID_PUBLIC_KEY')
         }))
         .then(sub => {
-            // Send subscription to server
             fetch('/api/subscribe', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify(sub)
             }).then(res => res.json()).then(data => {
-                document.getElementById('notifyStatus').textContent = '✅ Notifications enabled';
+                document.getElementById('notifyStatus').textContent = 'Notifications enabled';
                 logDebug('Subscribed');
             });
         })
         .catch(err => {
-            document.getElementById('notifyStatus').textContent = '❌ ' + err.message;
-            logDebug('Push error: '+err.message);
+            document.getElementById('notifyStatus').textContent = 'Error: ' + err.message;
+            logDebug('Push error: ' + err.message);
         });
 }
 
-// Helper for VAPID key
 function urlBase64ToUint8Array(base64String) {
     const padding = '='.repeat((4 - base64String.length % 4) % 4);
     const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
@@ -710,14 +670,12 @@ function urlBase64ToUint8Array(base64String) {
     return outputArray;
 }
 
-// Service worker registration
 if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('/sw.js')
         .then(() => logDebug('SW registered'))
-        .catch(err => logDebug('SW reg error: '+err));
+        .catch(err => logDebug('SW reg error: ' + err));
 }
 
-// Auto-load location on start
 window.onload = function() {
     fetchByLocation();
 };
@@ -726,7 +684,7 @@ window.onload = function() {
 </html>
 """
 
-# ---------- BACKEND ROUTES ----------
+# ---------- Routes ----------
 @app.route('/')
 def index():
     return render_template_string(HTML_TEMPLATE)
@@ -745,12 +703,11 @@ def manifest():
 
 @app.route('/sw.js')
 def sw():
-    # Simple service worker that caches and handles push
     sw_js = """
 self.addEventListener('install', e => e.waitUntil(self.skipWaiting()));
 self.addEventListener('activate', e => e.waitUntil(self.clients.claim()));
 self.addEventListener('push', e => {
-    const data = e.data ? e.data.json() : {title: 'Weather Alert', body: 'Check your weather'};
+    const data = e.data ? e.data.json() : {title: 'Weather Alert', body: 'Check weather'};
     e.waitUntil(
         self.registration.showNotification(data.title || 'Weather Alert', {
             body: data.body || 'Severe weather possible',
@@ -813,7 +770,7 @@ def subscribe():
         return jsonify({"status": "ok"})
     return jsonify({"error": "Invalid"}), 400
 
-# ---------- BACKEND FUNCTIONS ----------
+# ---------- Backend functions ----------
 def geocode_zip(zip_code):
     url = f"http://api.openweathermap.org/geo/1.0/zip?zip={zip_code},US&appid={API_KEY}"
     resp = requests.get(url, timeout=10)
@@ -886,7 +843,6 @@ def get_weather_data(lat, lon):
     return {"current": current, "hourly": hourly, "daily": daily}
 
 def get_nws_alerts(lat, lon):
-    # NWS API: point metadata
     point_url = f"https://api.weather.gov/points/{lat},{lon}"
     point_resp = requests.get(point_url, headers={"User-Agent": "WeatherApp/1.0"})
     if point_resp.status_code != 200:
@@ -912,14 +868,6 @@ def get_nws_alerts(lat, lon):
         })
     return result
 
-# ---------- BACKGROUND THREAD FOR PUSH NOTIFICATIONS (simulated) ----------
-def alert_pusher():
-    """Periodically check for alerts and push to all subscribers (simplified)"""
-    # In production, you'd use a proper scheduler and only push when new alerts appear.
-    # This is a demo placeholder.
-    pass
-
-# ---------- RUN ----------
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 5000))
     app.run(host='0.0.0.0', port=port)
