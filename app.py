@@ -1,5 +1,4 @@
 # -*- coding: utf-8 -*-
-# Weather Hub – Multi‑ZIP, NWS Alerts, Themes, Push Notifications
 import requests
 import os
 import logging
@@ -15,592 +14,202 @@ if not API_KEY:
 app = Flask(__name__)
 logging.basicConfig(level=logging.INFO)
 
-# In‑memory store for push subscriptions (for demo)
 subscriptions = []
 
-# -------------------------------------------------------------------
-# HTML TEMPLATE (all frontend)
-# -------------------------------------------------------------------
 HTML_TEMPLATE = """
 <!DOCTYPE html>
 <html>
 <head>
     <meta charset="utf-8">
-    <title>Weather Hub</title>
     <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
     <link rel="manifest" href="/manifest.json">
-    <style id="theme-style">
-        /* ----- default: Apple Dark ----- */
-        :root {
-            --bg: #0a0e14;
-            --text: #e8edf3;
-            --card-bg: rgba(255,255,255,0.04);
-            --border: rgba(255,255,255,0.06);
-            --accent: #4a8eff;
-            --secondary: #6a7b8f;
-            --glass: rgba(255,255,255,0.03);
-            --shadow: rgba(0,0,0,0.4);
-            --radius: 32px;
-            --font: -apple-system, 'Helvetica Neue', sans-serif;
-            --transition: 0.3s;
-        }
+    <title>Weather Hub</title>
+    <style>
         * { margin:0; padding:0; box-sizing:border-box; }
-        body {
-            background: var(--bg);
-            color: var(--text);
-            font-family: var(--font);
-            padding: 16px;
-            min-height: 100vh;
-            display: flex;
-            justify-content: center;
-            align-items: flex-start;
-            transition: background var(--transition), color var(--transition);
+        :root {
+            --bg: #0a0e14; --text: #e8edf3; --card-bg: rgba(255,255,255,0.04);
+            --border: rgba(255,255,255,0.06); --accent: #4a8eff; --secondary: #6a7b8f;
+            --shadow: rgba(0,0,0,0.4); --radius: 32px; --font: -apple-system, sans-serif;
         }
-        .app { max-width: 520px; width:100%; margin:0 auto; }
-
-        /* theme bar */
-        .theme-bar {
-            display: flex;
-            gap: 6px;
-            flex-wrap: wrap;
-            margin-bottom: 14px;
-            justify-content: center;
-        }
-        .theme-btn {
-            padding: 5px 12px;
-            border-radius: 20px;
-            border: 1px solid var(--border);
-            background: var(--card-bg);
-            color: var(--text);
-            font-size: 0.75rem;
-            cursor: pointer;
-            transition: 0.2s;
-            font-weight: 500;
-        }
-        .theme-btn:hover,
-        .theme-btn.active {
-            background: var(--accent);
-            color: #fff;
-            border-color: var(--accent);
-        }
-
-        /* header (triple-click) */
-        .header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            padding: 8px 0;
-            border-bottom: 1px solid var(--border);
-            margin-bottom: 14px;
-            cursor: default;
-            user-select: none;
-        }
-        .header h1 { font-size: 1.4rem; font-weight:600; letter-spacing:-0.5px; }
-        .header-actions button {
-            background: var(--card-bg);
-            border: 1px solid var(--border);
-            color: var(--secondary);
-            font-size: 1.1rem;
-            padding: 5px 10px;
-            border-radius: 20px;
-            cursor: pointer;
-            transition: 0.2s;
-            margin-left: 4px;
-        }
-        .header-actions button:hover { background: var(--accent); color: #fff; }
-
-        /* search row */
-        .search-row {
-            display: flex;
-            gap: 6px;
-            margin-bottom: 14px;
-        }
-        .search-row input {
-            flex: 1;
-            background: var(--card-bg);
-            border: 1px solid var(--border);
-            border-radius: 30px;
-            padding: 10px 16px;
-            color: var(--text);
-            font-size: 0.95rem;
-            outline: none;
-            transition: 0.2s;
-        }
-        .search-row input::placeholder { color: var(--secondary); }
-        .search-row input:focus { border-color: var(--accent); }
-        .search-row button {
-            background: var(--accent);
-            border: none;
-            border-radius: 30px;
-            padding: 10px 16px;
-            color: #fff;
-            font-weight: 600;
-            font-size: 0.85rem;
-            cursor: pointer;
-            transition: 0.2s;
-        }
-        .search-row button:hover { filter: brightness(1.1); }
-        .search-row .loc-btn {
-            background: var(--card-bg);
-            color: var(--text);
-            border: 1px solid var(--border);
-        }
-        .search-row .loc-btn:hover { background: var(--accent); color:#fff; }
-
-        /* notify button */
-        .notify-btn {
-            background: var(--card-bg);
-            border: 1px solid var(--border);
-            border-radius: 30px;
-            padding: 8px 16px;
-            color: var(--text);
-            font-size: 0.8rem;
-            cursor: pointer;
-            transition: 0.2s;
-            margin-bottom: 12px;
-            width: 100%;
-            text-align: center;
-        }
-        .notify-btn:hover { background: var(--accent); color:#fff; }
-        .notify-status {
-            font-size: 0.7rem;
-            color: var(--secondary);
-            text-align: center;
-            margin-top: 4px;
-        }
-
-        /* alert banner */
-        .alert-banner {
-            background: rgba(255,200,50,0.12);
-            border: 1px solid #ffcc44;
-            border-radius: 16px;
-            padding: 10px 14px;
-            margin-bottom: 14px;
-            display: none;
-            cursor: pointer;
-            transition: 0.2s;
-        }
-        .alert-banner:hover { background: rgba(255,200,50,0.2); }
-        .alert-banner .alert-title { font-weight: 600; color: #ffcc44; }
-        .alert-banner .alert-desc { font-size: 0.8rem; color: var(--secondary); }
-
-        /* location manager */
-        .loc-manager {
-            background: var(--card-bg);
-            border-radius: 16px;
-            padding: 12px;
-            margin-bottom: 14px;
-            border: 1px solid var(--border);
-        }
-        .loc-manager .row {
-            display: flex;
-            gap: 6px;
-            margin-bottom: 8px;
-        }
-        .loc-manager .row input {
-            flex: 1;
-            padding: 8px 12px;
-            border-radius: 20px;
-            border: 1px solid var(--border);
-            background: var(--bg);
-            color: var(--text);
-        }
-        .loc-manager .row button {
-            padding: 8px 16px;
-            border-radius: 20px;
-            border: none;
-            background: var(--accent);
-            color: #fff;
-            cursor: pointer;
-        }
-        .loc-tags {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 6px;
-        }
-        .loc-tag {
-            background: var(--glass);
-            padding: 4px 12px;
-            border-radius: 20px;
-            font-size: 0.8rem;
-            display: flex;
-            align-items: center;
-            gap: 6px;
-            border: 1px solid var(--border);
-        }
-        .loc-tag .del {
-            cursor: pointer;
-            opacity: 0.6;
-        }
+        body { background:var(--bg); color:var(--text); font-family:var(--font); padding:16px; display:flex; justify-content:center; }
+        .app { max-width:500px; width:100%; }
+        .theme-bar { display:flex; gap:6px; flex-wrap:wrap; margin-bottom:14px; justify-content:center; }
+        .theme-btn { padding:5px 12px; border-radius:20px; border:1px solid var(--border); background:var(--card-bg); color:var(--text); font-size:0.75rem; cursor:pointer; transition:0.2s; }
+        .theme-btn.active, .theme-btn:hover { background:var(--accent); color:#fff; border-color:var(--accent); }
+        .header { display:flex; justify-content:space-between; align-items:center; padding:8px 0; border-bottom:1px solid var(--border); margin-bottom:14px; cursor:default; user-select:none; }
+        .header h1 { font-size:1.4rem; }
+        .header button { background:var(--card-bg); border:1px solid var(--border); color:var(--secondary); font-size:1.1rem; padding:5px 10px; border-radius:20px; cursor:pointer; transition:0.2s; margin-left:4px; }
+        .header button:hover { background:var(--accent); color:#fff; }
+        .search-row { display:flex; gap:6px; margin-bottom:14px; }
+        .search-row input { flex:1; background:var(--card-bg); border:1px solid var(--border); border-radius:30px; padding:10px 16px; color:var(--text); font-size:0.95rem; outline:none; }
+        .search-row input:focus { border-color:var(--accent); }
+        .search-row button { background:var(--accent); border:none; border-radius:30px; padding:10px 16px; color:#fff; font-weight:600; font-size:0.85rem; cursor:pointer; transition:0.2s; }
+        .search-row button:hover { filter:brightness(1.1); }
+        .search-row .loc-btn { background:var(--card-bg); color:var(--text); border:1px solid var(--border); }
+        .search-row .loc-btn:hover { background:var(--accent); color:#fff; }
+        .notify-btn { background:var(--card-bg); border:1px solid var(--border); border-radius:30px; padding:8px; width:100%; text-align:center; cursor:pointer; transition:0.2s; margin-bottom:12px; font-size:0.8rem; }
+        .notify-btn:hover { background:var(--accent); color:#fff; }
+        .notify-status { font-size:0.7rem; color:var(--secondary); text-align:center; margin-top:4px; }
+        .alert-banner { background:rgba(255,200,50,0.12); border:1px solid #ffcc44; border-radius:16px; padding:10px 14px; margin-bottom:14px; display:none; cursor:pointer; transition:0.2s; }
+        .alert-banner:hover { background:rgba(255,200,50,0.2); }
+        .alert-banner .title { font-weight:600; color:#ffcc44; }
+        .alert-banner .desc { font-size:0.8rem; color:var(--secondary); }
+        .loc-manager { background:var(--card-bg); border-radius:16px; padding:12px; margin-bottom:14px; border:1px solid var(--border); }
+        .loc-manager .row { display:flex; gap:6px; margin-bottom:8px; }
+        .loc-manager .row input { flex:1; padding:8px 12px; border-radius:20px; border:1px solid var(--border); background:var(--bg); color:var(--text); }
+        .loc-manager .row button { padding:8px 16px; border-radius:20px; border:none; background:var(--accent); color:#fff; cursor:pointer; }
+        .loc-tags { display:flex; flex-wrap:wrap; gap:6px; }
+        .loc-tag { background:var(--glass); padding:4px 12px; border-radius:20px; font-size:0.8rem; display:flex; align-items:center; gap:6px; border:1px solid var(--border); }
+        .loc-tag .del { cursor:pointer; opacity:0.6; }
         .loc-tag .del:hover { opacity:1; color:#ff6b6b; }
-
-        /* weather cards */
-        .current-card {
-            background: var(--card-bg);
-            backdrop-filter: blur(20px);
-            border-radius: var(--radius);
-            padding: 20px 18px;
-            margin-bottom: 16px;
-            border: 1px solid var(--border);
-            box-shadow: 0 8px 32px var(--shadow);
-            transition: background var(--transition), transform 0.2s;
-        }
-        .current-card:hover { transform: scale(1.01); }
-        .temp-row {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-        .temp-main {
-            font-size: 3.8rem;
-            font-weight: 300;
-            letter-spacing: -2px;
-            line-height: 1;
-        }
-        .temp-main small { font-size: 1.6rem; font-weight:300; color:var(--secondary); }
-        .condition-text {
-            font-size: 1.1rem;
-            font-weight:500;
-            margin:4px 0 2px;
-        }
+        .card { background:var(--card-bg); backdrop-filter:blur(20px); border-radius:var(--radius); padding:20px; margin-bottom:16px; border:1px solid var(--border); box-shadow:0 8px 32px var(--shadow); transition:0.2s; }
+        .card:hover { transform:scale(1.01); }
+        .temp-row { display:flex; justify-content:space-between; align-items:center; }
+        .temp-main { font-size:3.8rem; font-weight:300; letter-spacing:-2px; line-height:1; }
+        .temp-main small { font-size:1.6rem; font-weight:300; color:var(--secondary); }
+        .condition { font-size:1.1rem; font-weight:500; margin:4px 0 2px; }
         .high-low { font-size:0.95rem; color:var(--secondary); }
-
-        .extra-details {
-            display: grid;
-            grid-template-columns: 1fr 1fr 1fr;
-            gap: 10px;
-            margin-top: 14px;
-            padding-top: 14px;
-            border-top: 1px solid var(--border);
-        }
-        .extra-detail { text-align:center; }
-        .extra-detail .label {
-            font-size:0.65rem;
-            text-transform:uppercase;
-            color:var(--secondary);
-            letter-spacing:0.5px;
-        }
-        .extra-detail .value {
-            font-size:1rem;
-            font-weight:500;
-            margin-top:2px;
-        }
-
-        .section-title {
-            display: flex;
-            justify-content: space-between;
-            align-items: baseline;
-            margin: 16px 0 8px;
-            padding: 0 4px;
-        }
-        .section-title h3 {
-            font-size:0.95rem;
-            font-weight:600;
-            color:var(--secondary);
-            letter-spacing:0.3px;
-        }
-
-        .hourly-scroll {
-            display: flex;
-            overflow-x: auto;
-            gap: 12px;
-            padding: 6px 4px 14px;
-            scroll-snap-type: x mandatory;
-            -webkit-overflow-scrolling: touch;
-        }
-        .hourly-scroll::-webkit-scrollbar { height:3px; background:transparent; }
-        .hourly-scroll::-webkit-scrollbar-thumb { background:var(--secondary); border-radius:4px; }
-        .hour-item {
-            flex: 0 0 65px;
-            text-align:center;
-            background: var(--card-bg);
-            border-radius:18px;
-            padding:8px 4px;
-            border:1px solid var(--border);
-            scroll-snap-align:start;
-            cursor:pointer;
-            transition:0.2s;
-        }
-        .hour-item:hover {
-            background:var(--accent);
-            border-color:var(--accent);
-            transform:scale(1.05);
-        }
+        .details { display:grid; grid-template-columns:1fr 1fr 1fr; gap:10px; margin-top:14px; padding-top:14px; border-top:1px solid var(--border); }
+        .detail { text-align:center; }
+        .detail .label { font-size:0.65rem; text-transform:uppercase; color:var(--secondary); letter-spacing:0.5px; }
+        .detail .value { font-size:1rem; font-weight:500; margin-top:2px; }
+        .section-title { display:flex; justify-content:space-between; align-items:baseline; margin:16px 0 8px; padding:0 4px; }
+        .section-title h3 { font-size:0.95rem; font-weight:600; color:var(--secondary); }
+        .hourly { display:flex; overflow-x:auto; gap:12px; padding:6px 4px 14px; scroll-snap-type:x mandatory; -webkit-overflow-scrolling:touch; }
+        .hourly::-webkit-scrollbar { height:3px; background:transparent; }
+        .hourly::-webkit-scrollbar-thumb { background:var(--secondary); border-radius:4px; }
+        .hour-item { flex:0 0 65px; text-align:center; background:var(--card-bg); border-radius:18px; padding:8px 4px; border:1px solid var(--border); scroll-snap-align:start; cursor:pointer; transition:0.2s; }
+        .hour-item:hover { background:var(--accent); border-color:var(--accent); transform:scale(1.05); }
         .hour-item .time { font-size:0.7rem; color:var(--secondary); }
         .hour-item .temp { font-size:1.1rem; font-weight:500; margin:2px 0; }
         .hour-item .icon { font-size:1.2rem; }
         .hour-item .pop { font-size:0.65rem; color:var(--accent); }
-
-        .daily-list {
-            display: flex;
-            flex-direction: column;
-            gap: 4px;
-            margin-top:6px;
-        }
-        .day-item {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            background: var(--card-bg);
-            padding: 10px 14px;
-            border-radius: 14px;
-            border: 1px solid var(--border);
-            transition:0.15s;
-        }
-        .day-item:hover { background: var(--glass); }
+        .daily { display:flex; flex-direction:column; gap:4px; margin-top:6px; }
+        .day-item { display:flex; justify-content:space-between; align-items:center; background:var(--card-bg); padding:10px 14px; border-radius:14px; border:1px solid var(--border); transition:0.15s; }
+        .day-item:hover { background:var(--glass); }
         .day-item .day-name { font-weight:500; width:60px; font-size:0.9rem; }
         .day-item .day-icon { font-size:1.1rem; width:36px; text-align:center; }
         .day-item .day-temps .high { color:var(--text); }
         .day-item .day-temps .low { color:var(--secondary); margin-left:6px; }
         .day-item .day-pop { font-size:0.75rem; color:var(--accent); width:45px; text-align:right; }
-
-        /* modal */
-        .modal {
-            display: none;
-            position: fixed;
-            top:0; left:0; right:0; bottom:0;
-            background: rgba(0,0,0,0.7);
-            backdrop-filter: blur(4px);
-            justify-content: center;
-            align-items: center;
-            z-index:1000;
-        }
+        .modal { display:none; position:fixed; inset:0; background:rgba(0,0,0,0.7); backdrop-filter:blur(4px); justify-content:center; align-items:center; z-index:1000; }
         .modal.active { display:flex; }
-        .modal-content {
-            background: var(--bg);
-            border: 1px solid var(--border);
-            border-radius: 32px;
-            padding: 28px 24px;
-            max-width: 340px;
-            width:90%;
-            box-shadow: 0 20px 60px rgba(0,0,0,0.8);
-            color: var(--text);
-        }
+        .modal-content { background:var(--bg); border:1px solid var(--border); border-radius:32px; padding:28px 24px; max-width:340px; width:90%; box-shadow:0 20px 60px rgba(0,0,0,0.8); }
         .modal-content h2 { font-size:1.4rem; margin-bottom:12px; }
         .modal-content p { margin:6px 0; font-size:0.95rem; color:var(--secondary); }
-        .modal-content .close-btn {
-            margin-top:16px;
-            background: var(--accent);
-            border:none;
-            border-radius:30px;
-            padding:10px 20px;
-            color:#fff;
-            font-weight:600;
-            cursor:pointer;
-            width:100%;
-        }
-        .modal-content .close-btn:hover { filter:brightness(1.1); }
-
-        .loading-state { text-align:center; padding:30px 0; color:var(--secondary); }
-        .error-state {
-            background: rgba(255,70,70,0.08);
-            border:1px solid rgba(255,70,70,0.2);
-            border-radius:16px;
-            padding:16px;
-            color:#ff7a7a;
-            text-align:center;
-        }
-        .debug-box {
-            background: rgba(0,0,0,0.3);
-            border-radius:10px;
-            padding:6px 10px;
-            font-size:0.6rem;
-            color:#4a6a5a;
-            margin-top:16px;
-            max-height:60px;
-            overflow-y:auto;
-            display:none;
-            font-family:monospace;
-            border:1px solid var(--border);
-        }
-
-        /* admin panel */
-        .admin-panel {
-            background: var(--card-bg);
-            border: 1px solid var(--border);
-            border-radius:16px;
-            padding:16px;
-            margin-top:16px;
-            display:none;
-        }
-        .admin-panel h4 { font-size:0.9rem; margin-bottom:8px; color:var(--accent); }
-        .admin-panel .row {
-            display:flex;
-            gap:6px;
-            flex-wrap:wrap;
-            align-items:center;
-            margin-bottom:6px;
-        }
-        .admin-panel input,
-        .admin-panel textarea {
-            background: var(--bg);
-            border: 1px solid var(--border);
-            color: var(--text);
-            padding: 6px 10px;
-            border-radius:12px;
-            flex:1;
-            min-width:120px;
-            font-size:0.8rem;
-        }
-        .admin-panel button {
-            background: var(--card-bg);
-            border:1px solid var(--border);
-            color:var(--text);
-            padding:6px 14px;
-            border-radius:20px;
-            cursor:pointer;
-            font-size:0.75rem;
-            transition:0.2s;
-        }
-        .admin-panel button:hover { background:var(--accent); color:#fff; }
-        .admin-panel .log-area {
-            background: rgba(0,0,0,0.2);
-            border-radius:8px;
-            padding:8px;
-            font-size:0.65rem;
-            max-height:100px;
-            overflow-y:auto;
-            margin-top:8px;
-            font-family:monospace;
-            color:var(--secondary);
-            white-space:pre-wrap;
-            word-break:break-all;
-        }
-
-        @media (max-width:480px) {
-            .temp-main { font-size:3rem; }
-            .extra-details { grid-template-columns:1fr 1fr; }
-        }
+        .modal-content .close { margin-top:16px; background:var(--accent); border:none; border-radius:30px; padding:10px; color:#fff; font-weight:600; cursor:pointer; width:100%; }
+        .modal-content .close:hover { filter:brightness(1.1); }
+        .loading { text-align:center; padding:30px 0; color:var(--secondary); }
+        .error { background:rgba(255,70,70,0.08); border:1px solid rgba(255,70,70,0.2); border-radius:16px; padding:16px; color:#ff7a7a; text-align:center; }
+        .debug { background:rgba(0,0,0,0.3); border-radius:10px; padding:6px 10px; font-size:0.6rem; color:#4a6a5a; margin-top:16px; max-height:60px; overflow-y:auto; display:none; font-family:monospace; border:1px solid var(--border); }
+        .admin { background:var(--card-bg); border:1px solid var(--border); border-radius:16px; padding:16px; margin-top:16px; display:none; }
+        .admin h4 { font-size:0.9rem; margin-bottom:8px; color:var(--accent); }
+        .admin .row { display:flex; gap:6px; flex-wrap:wrap; align-items:center; margin-bottom:6px; }
+        .admin input { background:var(--bg); border:1px solid var(--border); color:var(--text); padding:6px 10px; border-radius:12px; flex:1; min-width:100px; font-size:0.8rem; }
+        .admin button { background:var(--card-bg); border:1px solid var(--border); color:var(--text); padding:6px 14px; border-radius:20px; cursor:pointer; font-size:0.75rem; transition:0.2s; }
+        .admin button:hover { background:var(--accent); color:#fff; }
+        .admin .log { background:rgba(0,0,0,0.2); border-radius:8px; padding:8px; font-size:0.65rem; max-height:100px; overflow-y:auto; font-family:monospace; color:var(--secondary); white-space:pre-wrap; }
+        @media (max-width:480px) { .temp-main { font-size:3rem; } .details { grid-template-columns:1fr 1fr; } }
     </style>
 </head>
 <body>
 <div class="app">
 
-    <!-- Theme bar -->
-    <div class="theme-bar">
-        <button class="theme-btn active" data-theme="apple-dark">🍎 Dark</button>
-        <button class="theme-btn" data-theme="apple-light">🍎 Light</button>
-        <button class="theme-btn" data-theme="retro">🖥 Retro</button>
-        <button class="theme-btn" data-theme="lightning">⚡ Lightning</button>
-    </div>
-
-    <!-- Header (triple-click for admin) -->
-    <div class="header" id="headerTitle">
-        <h1>⛅ Weather Hub</h1>
-        <div class="header-actions">
-            <button onclick="fetchByLocation()" title="My Location">📍</button>
-            <button onclick="refreshAll()" title="Refresh All">⟳</button>
-        </div>
-    </div>
-
-    <!-- Location manager -->
-    <div class="loc-manager">
-        <div class="row">
-            <input id="newZip" placeholder="Add ZIP (e.g., 43065)" value="">
-            <button onclick="addZip()">➕ Add</button>
-        </div>
-        <div class="loc-tags" id="zipTags"></div>
-    </div>
-
-    <!-- Notifications -->
-    <button class="notify-btn" id="notifyBtn" onclick="subscribePush()">🔔 Enable Notifications</button>
-    <div class="notify-status" id="notifyStatus">Get severe weather alerts via push</div>
-
-    <!-- Alert banner -->
-    <div class="alert-banner" id="alertBanner" onclick="showAlertModal()">
-        <div class="alert-title" id="alertTitle">⚠️ Weather Alert</div>
-        <div class="alert-desc" id="alertDesc">Click for details</div>
-    </div>
-
-    <!-- Weather content -->
-    <div id="content">
-        <div class="loading-state">Add a ZIP or tap location</div>
-    </div>
-
-    <!-- Modals -->
-    <div class="modal" id="hourModal">
-        <div class="modal-content">
-            <h2 id="modalTitle">Hour Detail</h2>
-            <p id="modalBody">Loading...</p>
-            <button class="close-btn" onclick="closeModal()">Close</button>
-        </div>
-    </div>
-    <div class="modal" id="alertModal">
-        <div class="modal-content">
-            <h2>⚠️ NWS Alerts</h2>
-            <div id="alertBody"></div>
-            <button class="close-btn" onclick="closeAlertModal()">Close</button>
-        </div>
-    </div>
-
-    <!-- Admin panel (hidden) -->
-    <div class="admin-panel" id="adminPanel">
-        <h4>🛠️ Admin Panel</h4>
-        <div class="row">
-            <input id="customPushTitle" placeholder="Push Title" value="Custom Message">
-            <input id="customPushBody" placeholder="Push Body" value="This is a test push.">
-            <button onclick="sendCustomPush()">📲 Send</button>
-        </div>
-        <div style="display:flex; gap:6px; flex-wrap:wrap; margin-top:6px;">
-            <button onclick="testAlert()">🔔 Test Alert</button>
-            <button onclick="refreshAll()">🔄 Refresh All</button>
-            <button onclick="clearLogs()">🗑️ Clear Log</button>
-        </div>
-        <div class="log-area" id="adminLog">Ready.</div>
-    </div>
-
-    <div class="debug-box" id="debug"></div>
+<!-- Theme bar -->
+<div class="theme-bar">
+    <button class="theme-btn active" data-theme="dark">Dark</button>
+    <button class="theme-btn" data-theme="light">Light</button>
+    <button class="theme-btn" data-theme="retro">Retro</button>
+    <button class="theme-btn" data-theme="lightning">Lightning</button>
 </div>
 
+<!-- Header (triple-click for admin) -->
+<div class="header" id="headerTitle">
+    <h1>⛅ Weather Hub</h1>
+    <div>
+        <button onclick="getLocation()" title="My Location">📍</button>
+        <button onclick="refreshAll()" title="Refresh All">⟳</button>
+    </div>
+</div>
+
+<!-- Location manager -->
+<div class="loc-manager">
+    <div class="row">
+        <input id="newZip" placeholder="Add ZIP (e.g., 43065)" value="">
+        <button onclick="addZip()">➕ Add</button>
+    </div>
+    <div class="loc-tags" id="zipTags"></div>
+</div>
+
+<!-- Notifications -->
+<button class="notify-btn" onclick="subscribePush()">🔔 Enable Notifications</button>
+<div class="notify-status" id="notifyStatus">Get severe weather alerts via push</div>
+
+<!-- Alert banner -->
+<div class="alert-banner" id="alertBanner" onclick="showAlertModal()">
+    <div class="title" id="alertTitle">⚠️ Weather Alert</div>
+    <div class="desc" id="alertDesc">Click for details</div>
+</div>
+
+<!-- Weather content -->
+<div id="content"><div class="loading">Add a ZIP or tap location</div></div>
+
+<!-- Modals -->
+<div class="modal" id="hourModal">
+    <div class="modal-content">
+        <h2 id="modalTitle">Hour Detail</h2>
+        <p id="modalBody">Loading...</p>
+        <button class="close" onclick="closeModal()">Close</button>
+    </div>
+</div>
+<div class="modal" id="alertModal">
+    <div class="modal-content">
+        <h2>⚠️ NWS Alerts</h2>
+        <div id="alertBody"></div>
+        <button class="close" onclick="closeAlertModal()">Close</button>
+    </div>
+</div>
+
+<!-- Admin panel -->
+<div class="admin" id="adminPanel">
+    <h4>🛠️ Admin Panel</h4>
+    <div class="row">
+        <input id="customPushTitle" placeholder="Push Title" value="Custom Message">
+        <input id="customPushBody" placeholder="Push Body" value="This is a test push.">
+        <button onclick="sendCustomPush()">📲 Send</button>
+    </div>
+    <div style="display:flex; gap:6px; flex-wrap:wrap; margin-top:6px;">
+        <button onclick="testAlert()">🔔 Test Alert</button>
+        <button onclick="refreshAll()">🔄 Refresh All</button>
+        <button onclick="clearLogs()">🗑️ Clear Log</button>
+    </div>
+    <div class="log" id="adminLog">Ready.</div>
+</div>
+
+<div class="debug" id="debug"></div>
+
 <script>
-// ============================================================
-//  THEMES
-// ============================================================
+// ===== THEMES =====
 const themes = {
-    'apple-dark': {
-        '--bg': '#0a0e14',
-        '--text': '#e8edf3',
-        '--card-bg': 'rgba(255,255,255,0.04)',
-        '--border': 'rgba(255,255,255,0.06)',
-        '--accent': '#4a8eff',
-        '--secondary': '#6a7b8f',
-        '--shadow': 'rgba(0,0,0,0.4)',
-        '--radius': '32px',
-        '--font': '-apple-system, "Helvetica Neue", sans-serif'
+    dark: {
+        '--bg': '#0a0e14', '--text': '#e8edf3', '--card-bg': 'rgba(255,255,255,0.04)',
+        '--border': 'rgba(255,255,255,0.06)', '--accent': '#4a8eff', '--secondary': '#6a7b8f',
+        '--shadow': 'rgba(0,0,0,0.4)', '--radius': '32px', '--font': '-apple-system, sans-serif'
     },
-    'apple-light': {
-        '--bg': '#f2f5f9',
-        '--text': '#1a202c',
-        '--card-bg': 'rgba(255,255,255,0.7)',
-        '--border': 'rgba(0,0,0,0.08)',
-        '--accent': '#007aff',
-        '--secondary': '#6a7b8f',
-        '--shadow': 'rgba(0,0,0,0.08)',
-        '--radius': '32px',
-        '--font': '-apple-system, "Helvetica Neue", sans-serif'
+    light: {
+        '--bg': '#f2f5f9', '--text': '#1a202c', '--card-bg': 'rgba(255,255,255,0.7)',
+        '--border': 'rgba(0,0,0,0.08)', '--accent': '#007aff', '--secondary': '#6a7b8f',
+        '--shadow': 'rgba(0,0,0,0.08)', '--radius': '32px', '--font': '-apple-system, sans-serif'
     },
-    'retro': {
-        '--bg': '#0a0f0a',
-        '--text': '#33ff33',
-        '--card-bg': 'rgba(0,20,0,0.5)',
-        '--border': '#33ff33',
-        '--accent': '#33ff33',
-        '--secondary': '#4f8f4f',
-        '--shadow': 'rgba(51,255,51,0.2)',
-        '--radius': '12px',
-        '--font': '"Courier New", monospace',
-        '--transition': '0.1s'
+    retro: {
+        '--bg': '#0a0f0a', '--text': '#33ff33', '--card-bg': 'rgba(0,20,0,0.5)',
+        '--border': '#33ff33', '--accent': '#33ff33', '--secondary': '#4f8f4f',
+        '--shadow': 'rgba(51,255,51,0.2)', '--radius': '12px', '--font': '"Courier New", monospace'
     },
-    'lightning': {
-        '--bg': '#0a0a12',
-        '--text': '#b8c7ff',
-        '--card-bg': 'rgba(30,40,80,0.4)',
-        '--border': '#6a7aff',
-        '--accent': '#8a9aff',
-        '--secondary': '#5a6a9f',
-        '--shadow': 'rgba(100,120,255,0.2)',
-        '--radius': '20px',
-        '--font': '"Segoe UI", sans-serif'
+    lightning: {
+        '--bg': '#0a0a12', '--text': '#b8c7ff', '--card-bg': 'rgba(30,40,80,0.4)',
+        '--border': '#6a7aff', '--accent': '#8a9aff', '--secondary': '#5a6a9f',
+        '--shadow': 'rgba(100,120,255,0.2)', '--radius': '20px', '--font': '"Segoe UI", sans-serif'
     }
 };
 
@@ -608,54 +217,37 @@ function applyTheme(name) {
     const theme = themes[name];
     if (!theme) return;
     const root = document.documentElement;
-    for (const [key, val] of Object.entries(theme)) {
-        root.style.setProperty(key, val);
-    }
-    document.querySelectorAll('.theme-btn').forEach(btn => {
-        btn.classList.toggle('active', btn.dataset.theme === name);
-    });
-    localStorage.setItem('weatherTheme', name);
+    for (let [k, v] of Object.entries(theme)) root.style.setProperty(k, v);
+    document.querySelectorAll('.theme-btn').forEach(b => b.classList.toggle('active', b.dataset.theme === name));
+    localStorage.setItem('theme', name);
 }
-document.querySelectorAll('.theme-btn').forEach(btn => {
-    btn.addEventListener('click', () => applyTheme(btn.dataset.theme));
-});
-const savedTheme = localStorage.getItem('weatherTheme') || 'apple-dark';
-applyTheme(savedTheme);
+document.querySelectorAll('.theme-btn').forEach(b => b.addEventListener('click', () => applyTheme(b.dataset.theme)));
+applyTheme(localStorage.getItem('theme') || 'dark');
 
-// ============================================================
-//  STATE
-// ============================================================
-let zipList = JSON.parse(localStorage.getItem('weatherZips') || '[]');
-let allWeatherData = {};          // not strictly used, but kept for future
-let hourlyDataMap = {};          // zip -> hourly array
-let currentAlerts = [];           // aggregated alerts across all zips
-let clickCount = 0;
-let clickTimer = null;
+// ===== STATE =====
+let zipList = JSON.parse(localStorage.getItem('zips') || '[]');
+let hourlyMap = {};
+let currentAlerts = [];
+let clickCount = 0, clickTimer = null;
 
-// ============================================================
-//  ADMIN PANEL (triple-click header)
-// ============================================================
+// ===== ADMIN TOGGLE (triple-click header) =====
 document.getElementById('headerTitle').addEventListener('click', function() {
     clickCount++;
     clearTimeout(clickTimer);
     clickTimer = setTimeout(() => { clickCount = 0; }, 500);
     if (clickCount === 3) {
-        const panel = document.getElementById('adminPanel');
-        panel.style.display = panel.style.display === 'block' ? 'none' : 'block';
-        adminLog('Admin panel toggled');
+        document.getElementById('adminPanel').style.display =
+            document.getElementById('adminPanel').style.display === 'block' ? 'none' : 'block';
+        adminLog('Admin toggled');
         clickCount = 0;
     }
 });
 
 function adminLog(msg) {
     const log = document.getElementById('adminLog');
-    log.innerHTML += new Date().toLocaleTimeString() + ' :: ' + msg + '\n';
+    log.textContent += new Date().toLocaleTimeString() + ' :: ' + msg + '\n';
     log.scrollTop = log.scrollHeight;
 }
-
-// ============================================================
-//  DEBUG LOGGING
-// ============================================================
 function logDebug(msg) {
     const el = document.getElementById('debug');
     el.style.display = 'block';
@@ -663,20 +255,14 @@ function logDebug(msg) {
     el.scrollTop = el.scrollHeight;
     adminLog('DEBUG: ' + msg);
 }
-
-// ============================================================
-//  UI HELPERS
-// ============================================================
 function showLoading(text) {
-    document.getElementById('content').innerHTML =
-        '<div class="loading-state">⏳ ' + text + '</div>';
+    document.getElementById('content').innerHTML = '<div class="loading">⏳ ' + text + '</div>';
 }
 function showError(msg) {
-    document.getElementById('content').innerHTML =
-        '<div class="error-state">⚠️ ' + msg + '</div>';
+    document.getElementById('content').innerHTML = '<div class="error">⚠️ ' + msg + '</div>';
     logDebug('ERROR: ' + msg);
 }
-function getIcon(desc) {
+function icon(desc) {
     const d = desc.toLowerCase();
     if (d.includes('clear')) return '☀️';
     if (d.includes('cloud')) return '☁️';
@@ -686,50 +272,38 @@ function getIcon(desc) {
     if (d.includes('mist') || d.includes('fog')) return '🌫️';
     return '🌤️';
 }
-function formatDay(isoDate) {
+function formatDay(iso) {
     const days = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
-    const d = new Date(isoDate + 'T00:00:00Z');
-    return days[d.getUTCDay()];
+    return days[new Date(iso + 'T00:00:00Z').getUTCDay()];
 }
 
-// ============================================================
-//  ZIP MANAGEMENT
-// ============================================================
+// ===== ZIP MANAGEMENT =====
 function saveZips() {
-    localStorage.setItem('weatherZips', JSON.stringify(zipList));
-    renderZipTags();
+    localStorage.setItem('zips', JSON.stringify(zipList));
+    renderTags();
 }
-function renderZipTags() {
-    const container = document.getElementById('zipTags');
-    if (zipList.length === 0) {
-        container.innerHTML = '<span style="opacity:0.5;font-size:0.8rem;">No ZIPs added.</span>';
-        return;
-    }
-    let html = '';
-    zipList.forEach(z => {
-        html += `<span class="loc-tag">${z} <span class="del" onclick="removeZip('${z}')">✕</span></span>`;
-    });
-    container.innerHTML = html;
+function renderTags() {
+    const c = document.getElementById('zipTags');
+    if (zipList.length === 0) { c.innerHTML = '<span style="opacity:0.5;font-size:0.8rem;">No ZIPs added.</span>'; return; }
+    c.innerHTML = zipList.map(z => `<span class="loc-tag">${z} <span class="del" onclick="removeZip('${z}')">✕</span></span>`).join('');
 }
 window.addZip = function() {
-    const input = document.getElementById('newZip');
-    const z = input.value.trim();
-    if (!z) return alert('Enter a ZIP code');
+    const inp = document.getElementById('newZip');
+    const z = inp.value.trim();
+    if (!z) return alert('Enter ZIP');
     if (zipList.includes(z)) return alert('Already added');
     zipList.push(z);
     saveZips();
-    input.value = '';
+    inp.value = '';
     refreshAll();
 };
-window.removeZip = function(zip) {
-    zipList = zipList.filter(z => z !== zip);
+window.removeZip = function(z) {
+    zipList = zipList.filter(x => x !== z);
     saveZips();
     refreshAll();
 };
 
-// ============================================================
-//  FETCH WEATHER FOR A SINGLE ZIP
-// ============================================================
+// ===== FETCH HELPERS =====
 function fetchWeatherForZip(zip) {
     return fetch('/api/zip?zip=' + zip)
         .then(r => r.json())
@@ -737,158 +311,128 @@ function fetchWeatherForZip(zip) {
             if (data.error) throw new Error(data.error);
             return fetch('/api/weather?lat=' + data.lat + '&lon=' + data.lon)
                 .then(r => r.json())
-                .then(wdata => {
-                    if (wdata.error) throw new Error(wdata.error);
+                .then(w => {
+                    if (w.error) throw new Error(w.error);
                     return fetch('/api/nws?lat=' + data.lat + '&lon=' + data.lon)
                         .then(r => r.json())
-                        .then(alertData => {
-                            return {
-                                weather: wdata,
-                                alerts: alertData.alerts || [],
-                                zip: zip
-                            };
-                        });
+                        .then(a => ({ weather: w, alerts: a.alerts || [], zip: zip }));
                 });
         });
 }
 
-// ============================================================
-//  REFRESH ALL
-// ============================================================
+// ===== REFRESH ALL =====
 window.refreshAll = function() {
     if (zipList.length === 0) {
-        document.getElementById('content').innerHTML =
-            '<div class="loading-state">Add a ZIP to see weather</div>';
+        document.getElementById('content').innerHTML = '<div class="loading">Add a ZIP to see weather</div>';
         return;
     }
     showLoading('Fetching ' + zipList.length + ' locations...');
-    const promises = zipList.map(z =>
-        fetchWeatherForZip(z).catch(err => {
-            logDebug('Error for ' + z + ': ' + err.message);
-            return { weather: null, alerts: [], zip: z, error: err.message };
-        })
-    );
-    Promise.all(promises).then(results => {
-        let combinedAlerts = [];
-        let allHtml = '';
-        results.forEach(res => {
-            if (res.error) {
-                allHtml += `<div class="current-card" style="border-color:#ff6b6b;">
-                    <strong>${res.zip}</strong> — Error: ${res.error}
-                </div>`;
-                return;
-            }
-            const w = res.weather;
-            const alerts = res.alerts;
-            if (alerts.length > 0) {
-                combinedAlerts = combinedAlerts.concat(
-                    alerts.map(a => ({ ...a, zip: res.zip }))
-                );
-            }
-            allHtml += renderOneLocation(w, res.zip);
-        });
-        document.getElementById('content').innerHTML = allHtml;
-
-        // Show alert banner if any alerts
-        if (combinedAlerts.length > 0) {
-            currentAlerts = combinedAlerts;
-            const banner = document.getElementById('alertBanner');
-            banner.style.display = 'block';
-            document.getElementById('alertTitle').textContent =
-                '⚠️ ' + combinedAlerts.length + ' Alert(s)';
-            document.getElementById('alertDesc').textContent =
-                combinedAlerts[0].headline || combinedAlerts[0].event;
-            // Trigger push notification
-            if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
-                navigator.serviceWorker.ready.then(reg => {
-                    reg.showNotification('⚠️ Weather Alert', {
-                        body: combinedAlerts[0].headline || combinedAlerts[0].event,
-                        icon: '/icon.png',
-                        tag: 'nws-alert'
+    Promise.all(zipList.map(z => fetchWeatherForZip(z).catch(err => ({ error: err.message, zip: z }))))
+        .then(results => {
+            let combined = [];
+            let html = '';
+            results.forEach(res => {
+                if (res.error) {
+                    html += `<div class="card" style="border-color:#ff6b6b;"><strong>${res.zip}</strong> — Error: ${res.error}</div>`;
+                    return;
+                }
+                const w = res.weather;
+                const alerts = res.alerts;
+                if (alerts.length) combined = combined.concat(alerts.map(a => ({ ...a, zip: res.zip })));
+                html += renderCard(w, res.zip);
+            });
+            document.getElementById('content').innerHTML = html;
+            // Alerts
+            if (combined.length) {
+                currentAlerts = combined;
+                const banner = document.getElementById('alertBanner');
+                banner.style.display = 'block';
+                document.getElementById('alertTitle').textContent = '⚠️ ' + combined.length + ' Alert(s)';
+                document.getElementById('alertDesc').textContent = combined[0].headline || combined[0].event;
+                if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
+                    navigator.serviceWorker.ready.then(reg => {
+                        reg.showNotification('⚠️ Weather Alert', {
+                            body: combined[0].headline || combined[0].event,
+                            icon: '/icon.png',
+                            tag: 'nws-alert'
+                        });
                     });
-                });
+                }
+            } else {
+                document.getElementById('alertBanner').style.display = 'none';
+                currentAlerts = [];
             }
-        } else {
-            document.getElementById('alertBanner').style.display = 'none';
-            currentAlerts = [];
-        }
-        logDebug('Refreshed ' + zipList.length + ' locations');
-        adminLog('Refreshed all locations');
-    }).catch(err => {
-        showError('Refresh failed: ' + err.message);
-    });
+            logDebug('Refreshed ' + zipList.length + ' locations');
+            adminLog('Refreshed all');
+        })
+        .catch(err => showError('Refresh failed: ' + err.message));
 };
 
-// ============================================================
-//  RENDER ONE LOCATION CARD
-// ============================================================
-function renderOneLocation(data, zip) {
+// ===== RENDER CARD =====
+function renderCard(data, zip) {
     const c = data.current;
     const hourly = data.hourly;
     const daily = data.daily;
-    hourlyDataMap[zip] = hourly;
+    hourlyMap[zip] = hourly;
 
-    let html = `<div class="current-card" data-zip="${zip}">`;
+    let html = `<div class="card" data-zip="${zip}">`;
     html += `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
         <strong style="font-size:1.2rem;">📍 ${zip}</strong>
         <span style="font-size:0.8rem;color:var(--secondary);">${c.description}</span>
     </div>`;
-    html += '<div class="temp-row"><div>';
-    html += '<div class="temp-main">' + Math.round(c.temp) + '°<small>F</small></div>';
-    html += '<div class="high-low">H: ' + Math.round(c.temp_max) + '° · L: ' + Math.round(c.temp_min) + '°</div>';
-    html += '</div><div style="font-size:3.8rem;">' + getIcon(c.description) + '</div></div>';
+    html += `<div class="temp-row"><div>
+        <div class="temp-main">${Math.round(c.temp)}°<small>F</small></div>
+        <div class="high-low">H: ${Math.round(c.temp_max)}° · L: ${Math.round(c.temp_min)}°</div>
+    </div><div style="font-size:3.8rem;">${icon(c.description)}</div></div>`;
 
-    html += '<div class="extra-details">';
-    html += '<div class="extra-detail"><div class="label">Feels Like</div><div class="value">' + Math.round(c.feels_like) + '°</div></div>';
-    html += '<div class="extra-detail"><div class="label">Humidity</div><div class="value">' + c.humidity + '%</div></div>';
-    html += '<div class="extra-detail"><div class="label">Wind</div><div class="value">' + Math.round(c.wind_speed) + ' mph</div></div>';
-    html += '<div class="extra-detail"><div class="label">Pressure</div><div class="value">' + c.pressure + ' hPa</div></div>';
-    html += '<div class="extra-detail"><div class="label">UV Index</div><div class="value">' + (c.uvi || '—') + '</div></div>';
-    html += '<div class="extra-detail"><div class="label">Visibility</div><div class="value">' + (c.visibility/1609).toFixed(1) + ' mi</div></div>';
-    html += '</div>';
+    html += `<div class="details">`;
+    html += `<div class="detail"><div class="label">Feels Like</div><div class="value">${Math.round(c.feels_like)}°</div></div>`;
+    html += `<div class="detail"><div class="label">Humidity</div><div class="value">${c.humidity}%</div></div>`;
+    html += `<div class="detail"><div class="label">Wind</div><div class="value">${Math.round(c.wind_speed)} mph</div></div>`;
+    html += `<div class="detail"><div class="label">Pressure</div><div class="value">${c.pressure} hPa</div></div>`;
+    html += `<div class="detail"><div class="label">UV Index</div><div class="value">${c.uvi || '—'}</div></div>`;
+    html += `<div class="detail"><div class="label">Visibility</div><div class="value">${(c.visibility/1609).toFixed(1)} mi</div></div>`;
+    html += `</div>`;
 
-    html += '<div style="margin-top:10px; font-size:0.75rem; color:var(--secondary); display:flex; justify-content:space-between;">';
-    html += '<span>☀️ Rise ' + c.sunrise.slice(11,16) + '</span>';
-    html += '<span>🌇 Set ' + c.sunset.slice(11,16) + '</span>';
-    html += '</div>';
+    html += `<div style="margin-top:10px; font-size:0.75rem; color:var(--secondary); display:flex; justify-content:space-between;">
+        <span>☀️ Rise ${c.sunrise.slice(11,16)}</span>
+        <span>🌇 Set ${c.sunset.slice(11,16)}</span>
+    </div>`;
 
-    // Hourly (clickable)
-    html += '<div class="section-title" style="margin-top:12px;"><h3>Hourly</h3><span>click for details</span></div>';
-    html += '<div class="hourly-scroll">';
+    // Hourly
+    html += `<div class="section-title" style="margin-top:12px;"><h3>Hourly</h3><span>click for details</span></div>`;
+    html += `<div class="hourly">`;
     hourly.slice(0,8).forEach((h, idx) => {
-        html += '<div class="hour-item" onclick="showHourDetail(\'' + zip + '\',' + idx + ')">';
-        html += '<div class="time">' + h.time.slice(11,16) + '</div>';
-        html += '<div class="icon">' + getIcon(h.description) + '</div>';
-        html += '<div class="temp">' + Math.round(h.temp) + '°</div>';
-        html += '<div class="pop">' + (h.pop > 0 ? Math.round(h.pop*100) + '%' : '') + '</div>';
-        html += '</div>';
+        html += `<div class="hour-item" onclick="showHour('${zip}',${idx})">
+            <div class="time">${h.time.slice(11,16)}</div>
+            <div class="icon">${icon(h.description)}</div>
+            <div class="temp">${Math.round(h.temp)}°</div>
+            <div class="pop">${h.pop > 0 ? Math.round(h.pop*100)+'%' : ''}</div>
+        </div>`;
     });
-    html += '</div>';
+    html += `</div>`;
 
     // Daily
-    html += '<div class="section-title"><h3>5-Day Forecast</h3></div><div class="daily-list">';
+    html += `<div class="section-title"><h3>5-Day Forecast</h3></div><div class="daily">`;
     daily.forEach(d => {
         const dayName = (d.date === new Date().toISOString().slice(0,10)) ? 'Today' : formatDay(d.date);
-        html += '<div class="day-item">';
-        html += '<span class="day-name">' + dayName + '</span>';
-        html += '<span class="day-icon">' + getIcon(d.description) + '</span>';
-        html += '<span class="day-temps"><span class="high">' + Math.round(d.temp_max) + '°</span><span class="low">' + Math.round(d.temp_min) + '°</span></span>';
-        html += '<span class="day-pop">' + (d.pop > 0 ? Math.round(d.pop*100) + '%' : '') + '</span>';
-        html += '</div>';
+        html += `<div class="day-item">
+            <span class="day-name">${dayName}</span>
+            <span class="day-icon">${icon(d.description)}</span>
+            <span class="day-temps"><span class="high">${Math.round(d.temp_max)}°</span><span class="low">${Math.round(d.temp_min)}°</span></span>
+            <span class="day-pop">${d.pop > 0 ? Math.round(d.pop*100)+'%' : ''}</span>
+        </div>`;
     });
-    html += '</div>';
+    html += `</div>`;
 
-    html += '</div>';
+    html += `</div>`;
     return html;
 }
 
-// ============================================================
-//  MODAL: HOURLY DETAIL
-// ============================================================
-function showHourDetail(zip, idx) {
-    const hourly = hourlyDataMap[zip];
-    if (!hourly || !hourly[idx]) return;
-    const h = hourly[idx];
+// ===== HOURLY MODAL =====
+function showHour(zip, idx) {
+    const h = hourlyMap[zip] && hourlyMap[zip][idx];
+    if (!h) return;
     const modal = document.getElementById('hourModal');
     document.getElementById('modalTitle').textContent = '🕒 ' + h.time.slice(11,16) + ' (' + zip + ')';
     let body = '';
@@ -906,51 +450,38 @@ function showHourDetail(zip, idx) {
     document.getElementById('modalBody').innerHTML = body;
     modal.classList.add('active');
 }
-function closeModal() {
-    document.getElementById('hourModal').classList.remove('active');
-}
+function closeModal() { document.getElementById('hourModal').classList.remove('active'); }
 
-// ============================================================
-//  ALERT MODAL
-// ============================================================
+// ===== ALERT MODAL =====
 function showAlertModal() {
     if (currentAlerts.length === 0) return;
     const modal = document.getElementById('alertModal');
     let html = '';
     currentAlerts.forEach(a => {
-        html += '<div style="margin-bottom:12px; border-bottom:1px solid var(--border); padding-bottom:8px;">';
-        html += '<strong>' + a.event + '</strong> <span style="font-size:0.7rem;color:var(--secondary);">(' + (a.zip || '') + ')</span><br>';
-        html += '<span style="font-size:0.8rem;color:var(--secondary);">' + (a.headline || '') + '</span><br>';
-        html += '<span style="font-size:0.75rem;">' + (a.description ? a.description.slice(0,200) + '...' : '') + '</span>';
-        html += '</div>';
+        html += `<div style="margin-bottom:12px; border-bottom:1px solid var(--border); padding-bottom:8px;">
+            <strong>${a.event}</strong> <span style="font-size:0.7rem;color:var(--secondary);">(${a.zip || ''})</span><br>
+            <span style="font-size:0.8rem;color:var(--secondary);">${a.headline || ''}</span><br>
+            <span style="font-size:0.75rem;">${a.description ? a.description.slice(0,200)+'...' : ''}</span>
+        </div>`;
     });
     document.getElementById('alertBody').innerHTML = html;
     modal.classList.add('active');
 }
-function closeAlertModal() {
-    document.getElementById('alertModal').classList.remove('active');
-}
+function closeAlertModal() { document.getElementById('alertModal').classList.remove('active'); }
 
-// ============================================================
-//  LOCATION (GPS)
-// ============================================================
-window.fetchByLocation = function() {
-    if (!navigator.geolocation) {
-        alert('Geolocation not supported');
-        return;
-    }
+// ===== LOCATION (GPS) =====
+window.getLocation = function() {
+    if (!navigator.geolocation) { alert('Geolocation not supported'); return; }
     navigator.geolocation.getCurrentPosition(
         pos => {
-            showLoading('Getting weather for your location...');
+            showLoading('Getting your location...');
             fetch('/api/weather?lat=' + pos.coords.latitude + '&lon=' + pos.coords.longitude)
                 .then(r => r.json())
                 .then(data => {
                     if (data.error) throw new Error(data.error);
-                    // Insert as a temporary card at the top
-                    const dummyZip = '📍 My Location';
-                    const html = renderOneLocation(data, dummyZip);
-                    const content = document.getElementById('content');
-                    content.innerHTML = html + content.innerHTML;
+                    const dummy = '📍 My Location';
+                    const card = renderCard(data, dummy);
+                    document.getElementById('content').innerHTML = card + document.getElementById('content').innerHTML;
                     logDebug('Added current location');
                 })
                 .catch(err => showError('Location error: ' + err.message));
@@ -959,58 +490,54 @@ window.fetchByLocation = function() {
     );
 };
 
-// ============================================================
-//  ADMIN: TEST ALERT
-// ============================================================
+// ===== FETCH ZIP =====
+window.fetchZip = function() {
+    const zip = document.getElementById('zipInput').value.trim();
+    if (!zip) return alert('Enter ZIP');
+    // Add to list if not present
+    if (!zipList.includes(zip)) {
+        zipList.push(zip);
+        saveZips();
+    }
+    refreshAll();
+};
+
+// ===== ADMIN: TEST ALERT =====
 window.testAlert = function() {
-    const testData = [{
+    const test = [{
         event: 'Test Alert',
-        headline: 'This is a simulated NWS alert for testing',
-        description: 'No actual weather warning exists.',
-        severity: 'Test',
-        effective: new Date().toISOString(),
+        headline: 'Simulated NWS alert for testing',
+        description: 'No actual warning exists.',
         zip: 'TEST'
     }];
-    currentAlerts = testData;
+    currentAlerts = test;
     const banner = document.getElementById('alertBanner');
     banner.style.display = 'block';
     document.getElementById('alertTitle').textContent = '⚠️ TEST Alert';
-    document.getElementById('alertDesc').textContent = 'Simulated NWS alert – click for details';
-    adminLog('Test alert displayed');
+    document.getElementById('alertDesc').textContent = 'Simulated – click for details';
+    adminLog('Test alert shown');
     if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
         navigator.serviceWorker.ready.then(reg => {
-            reg.showNotification('⚠️ TEST Alert', {
-                body: 'This is a test push from admin.',
-                icon: '/icon.png',
-                tag: 'test-alert'
-            });
+            reg.showNotification('⚠️ TEST Alert', { body: 'This is a test push.', icon: '/icon.png', tag: 'test' });
         });
     }
 };
 
-// ============================================================
-//  ADMIN: CUSTOM PUSH
-// ============================================================
+// ===== ADMIN: CUSTOM PUSH =====
 window.sendCustomPush = function() {
-    const title = document.getElementById('customPushTitle').value || 'Custom Message';
-    const body = document.getElementById('customPushBody').value || 'This is a test push.';
+    const title = document.getElementById('customPushTitle').value || 'Custom';
+    const body = document.getElementById('customPushBody').value || 'Test';
     if (!('serviceWorker' in navigator) || !navigator.serviceWorker.controller) {
-        alert('Service worker not active. Enable notifications first.');
+        alert('Enable notifications first');
         return;
     }
     navigator.serviceWorker.ready.then(reg => {
-        reg.showNotification(title, {
-            body: body,
-            icon: '/icon.png',
-            tag: 'custom-push'
-        });
+        reg.showNotification(title, { body: body, icon: '/icon.png', tag: 'custom' });
         adminLog('Custom push sent: ' + title);
     });
 };
 
-// ============================================================
-//  PUSH NOTIFICATIONS (with your VAPID public key)
-// ============================================================
+// ===== PUSH NOTIFICATIONS =====
 const VAPID_PUBLIC_KEY = 'BPtmgQv8hflZW4VYcjZV7QgVry8NSMddcBuoB53mzLZdrhYO81oKlpS1XW0I9zwxxj63qSJD_6DvMkekYqqf7XY';
 
 function subscribePush() {
@@ -1026,68 +553,52 @@ function subscribePush() {
             });
         })
         .then(sub => {
-            fetch('/api/subscribe', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify(sub)
-            }).then(res => res.json()).then(data => {
-                document.getElementById('notifyStatus').textContent = '✅ Notifications enabled';
-                logDebug('Subscribed to push');
-                adminLog('Push subscription successful');
-            });
+            fetch('/api/subscribe', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(sub) })
+                .then(r => r.json())
+                .then(() => {
+                    document.getElementById('notifyStatus').textContent = '✅ Notifications enabled';
+                    logDebug('Subscribed');
+                    adminLog('Push subscribed');
+                });
         })
         .catch(err => {
             document.getElementById('notifyStatus').textContent = '❌ ' + err.message;
             logDebug('Push error: ' + err.message);
-            adminLog('Push error: ' + err.message);
         });
 }
-
-function urlBase64ToUint8Array(base64String) {
-    const padding = '='.repeat((4 - base64String.length % 4) % 4);
-    const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
-    const rawData = window.atob(base64);
-    const outputArray = new Uint8Array(rawData.length);
-    for (let i = 0; i < rawData.length; ++i) {
-        outputArray[i] = rawData.charCodeAt(i);
-    }
-    return outputArray;
+function urlBase64ToUint8Array(b64) {
+    const padding = '='.repeat((4 - b64.length % 4) % 4);
+    const base64 = (b64 + padding).replace(/-/g, '+').replace(/_/g, '/');
+    const raw = window.atob(base64);
+    const out = new Uint8Array(raw.length);
+    for (let i = 0; i < raw.length; i++) out[i] = raw.charCodeAt(i);
+    return out;
 }
 
-// register service worker
 if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('/sw.js')
         .then(() => logDebug('SW registered'))
         .catch(err => logDebug('SW reg error: ' + err));
 }
 
-// ============================================================
-//  AUTO-LOAD ON START
-// ============================================================
-window.onload = function() {
-    renderZipTags();
-    if (zipList.length > 0) {
-        refreshAll();
-    } else {
-        document.getElementById('content').innerHTML =
-            '<div class="loading-state">Add a ZIP or tap location</div>';
-    }
-    adminLog('App loaded with ' + zipList.length + ' ZIPs');
-};
-
 window.clearLogs = function() {
-    document.getElementById('adminLog').innerHTML = 'Cleared.';
+    document.getElementById('adminLog').textContent = 'Cleared.';
     document.getElementById('debug').innerHTML = '';
     document.getElementById('debug').style.display = 'none';
+};
+
+window.onload = function() {
+    renderTags();
+    if (zipList.length) refreshAll();
+    else document.getElementById('content').innerHTML = '<div class="loading">Add a ZIP or tap location</div>';
+    adminLog('App loaded with ' + zipList.length + ' ZIPs');
 };
 </script>
 </body>
 </html>
 """
 
-# -------------------------------------------------------------------
-# FLASK ROUTES
-# -------------------------------------------------------------------
+# ===== FLASK ROUTES =====
 @app.route('/')
 def index():
     return render_template_string(HTML_TEMPLATE)
@@ -1133,8 +644,7 @@ def api_weather():
     if not lat or not lon:
         return jsonify({"error": "Missing lat/lon"}), 400
     try:
-        data = get_weather_data(float(lat), float(lon))
-        return jsonify(data)
+        return jsonify(get_weather_data(float(lat), float(lon)))
     except Exception as e:
         app.logger.error(f"Weather error: {str(e)}")
         return jsonify({"error": str(e)}), 500
@@ -1173,9 +683,7 @@ def subscribe():
         return jsonify({"status": "ok"})
     return jsonify({"error": "Invalid"}), 400
 
-# -------------------------------------------------------------------
-# BACKEND HELPERS
-# -------------------------------------------------------------------
+# ===== BACKEND HELPERS =====
 def geocode_zip(zip_code):
     url = f"http://api.openweathermap.org/geo/1.0/zip?zip={zip_code},US&appid={API_KEY}"
     resp = requests.get(url, timeout=10)
@@ -1232,11 +740,11 @@ def get_weather_data(lat, lon):
         })
 
     daily = []
-    dates_seen = set()
+    seen = set()
     for item in fore["list"]:
         date_str = datetime.fromtimestamp(item["dt"], tz=timezone.utc).isoformat()[:10]
-        if date_str not in dates_seen and len(daily) < 5:
-            dates_seen.add(date_str)
+        if date_str not in seen and len(daily) < 5:
+            seen.add(date_str)
             daily.append({
                 "date": date_str,
                 "temp_max": item["main"]["temp_max"],
@@ -1244,46 +752,35 @@ def get_weather_data(lat, lon):
                 "description": item["weather"][0]["description"],
                 "pop": item.get("pop", 0.0)
             })
-
     return {"current": current, "hourly": hourly, "daily": daily}
 
 def get_nws_alerts(lat, lon):
     headers = {
-        "User-Agent": "WeatherHub/1.0 (https://your-app.railway.app; scottvrrr@gmail.com)",
+        "User-Agent": "WeatherHub/1.0 (scottvrrr@gmail.com)",
         "Accept": "application/json"
     }
-    point_url = f"https://api.weather.gov/points/{lat},{lon}"
     try:
-        point_resp = requests.get(point_url, headers=headers, timeout=10)
-        if point_resp.status_code != 200:
-            app.logger.warning(f"NWS point API returned {point_resp.status_code}")
+        point = requests.get(f"https://api.weather.gov/points/{lat},{lon}", headers=headers, timeout=10)
+        if point.status_code != 200:
             return []
-        point_data = point_resp.json()
-        alerts_url = point_data.get("properties", {}).get("alerts")
+        alerts_url = point.json().get("properties", {}).get("alerts")
         if not alerts_url:
             return []
-        alerts_resp = requests.get(alerts_url, headers=headers, timeout=10)
-        if alerts_resp.status_code != 200:
-            app.logger.warning(f"NWS alerts API returned {alerts_resp.status_code}")
+        resp = requests.get(alerts_url, headers=headers, timeout=10)
+        if resp.status_code != 200:
             return []
-        alerts_data = alerts_resp.json()
-        features = alerts_data.get("features", [])
-        result = []
-        for f in features:
-            props = f.get("properties", {})
-            result.append({
-                "event": props.get("event", "Unknown"),
-                "headline": props.get("headline", ""),
-                "description": props.get("description", ""),
-                "severity": props.get("severity", ""),
-                "effective": props.get("effective", "")
-            })
-        return result
+        features = resp.json().get("features", [])
+        return [{
+            "event": f.get("properties", {}).get("event", "Unknown"),
+            "headline": f.get("properties", {}).get("headline", ""),
+            "description": f.get("properties", {}).get("description", ""),
+            "severity": f.get("properties", {}).get("severity", ""),
+            "effective": f.get("properties", {}).get("effective", "")
+        } for f in features]
     except Exception as e:
         app.logger.error(f"NWS exception: {str(e)}")
         return []
 
-# -------------------------------------------------------------------
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 5000))
     app.run(host='0.0.0.0', port=port)
